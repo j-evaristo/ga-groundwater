@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Georgia Groundwater Explorer — USGS Daily Water Levels</title>
+<style>
+:root{
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --series:#2a78d6; --series-wash:rgba(42,120,214,0.10); --series-wash2:rgba(42,120,214,0.22);
+  --lift:rgba(11,11,11,0.12); --sel-bg:rgba(42,120,214,0.08);
+}
+:root[data-theme="dark"]{
+  --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --series:#3987e5; --series-wash:rgba(57,135,229,0.14); --series-wash2:rgba(57,135,229,0.30);
+  --lift:rgba(255,255,255,0.18); --sel-bg:rgba(57,135,229,0.12);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --series:#3987e5; --series-wash:rgba(57,135,229,0.14); --series-wash2:rgba(57,135,229,0.30);
+    --lift:rgba(255,255,255,0.18); --sel-bg:rgba(57,135,229,0.12);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.topbar{display:flex;align-items:center;gap:14px;padding:12px 20px 10px;flex-wrap:wrap}
+.topbar h1{font-size:18px;font-weight:650;margin:0}
+.topbar .lab-line{font-size:12px;color:var(--ink2);margin-top:1px}
+.topbar .sub{color:var(--ink2);font-size:13px}
+.topbar .spacer{flex:1}
+button,select,input{font:inherit;color:inherit}
+.ghost-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:5px 12px;cursor:pointer;color:var(--ink2)}
+.ghost-btn:hover{background:var(--sel-bg)}
+.app{display:grid;grid-template-columns:322px minmax(0,1fr);gap:16px;padding:0 20px 28px;align-items:start}
+@media (max-width:900px){.app{grid-template-columns:1fr}}
+aside{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;position:sticky;top:12px;
+      display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 24px)}
+@media (max-width:900px){aside{position:static;max-height:none}}
+.search-wrap input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--page);color:var(--ink)}
+.search-wrap input:focus{outline:2px solid var(--series);outline-offset:1px}
+.sort-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)}
+.sort-row select{flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--page);color:var(--ink)}
+#map{width:100%;height:auto;display:block}
+#map .dot{fill:var(--muted);opacity:.55;cursor:pointer}
+#map .dot:hover{opacity:1;fill:var(--series)}
+#map .dot.dim{opacity:.12}
+#map .dot.sel{fill:var(--series);opacity:1;stroke:var(--surface);stroke-width:2}
+#map .outline{fill:none;stroke:var(--axis);stroke-width:1}
+.list-count{font-size:12px;color:var(--muted)}
+.site-list{overflow-y:auto;flex:1;min-height:120px;display:flex;flex-direction:column;gap:2px}
+.site-item{display:block;width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:8px;
+           padding:6px 8px;cursor:pointer}
+.site-item:hover{background:var(--sel-bg)}
+.site-item.sel{background:var(--sel-bg);border-color:var(--series)}
+.site-item .no{font-weight:600;font-variant-numeric:tabular-nums}
+.site-item .nm{color:var(--ink2);font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site-item .meta{color:var(--muted);font-size:11.5px;display:block}
+main{min-width:0;display:flex;flex-direction:column;gap:14px}
+.station-head h2{margin:2px 0 4px;font-size:20px;font-weight:650}
+.station-head .site-no-line{color:var(--ink2);font-size:13px}
+.station-head a{color:var(--series);text-decoration:none}
+.station-head a:hover{text-decoration:underline}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--ink2)}
+.chip b{color:var(--ink);font-weight:600}
+.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.preset{background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:12.5px;color:var(--ink2)}
+.preset:hover{background:var(--sel-bg)}
+.preset[aria-pressed="true"]{border-color:var(--series);color:var(--ink);background:var(--sel-bg);font-weight:600}
+.range-readout{font-size:12.5px;color:var(--muted);margin-left:2px}
+.filter-row select{padding:4px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 14px}
+.tile .lbl{font-size:12px;color:var(--ink2)}
+.tile .val{font-size:22px;font-weight:600;margin-top:2px}
+.tile .val .unit{font-size:12px;font-weight:400;color:var(--muted);margin-left:3px}
+.tile .sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px 12px}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.card-head h3{margin:0;font-size:14.5px;font-weight:650}
+.card-sub{margin:2px 0 0;font-size:12px;color:var(--ink2)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--ink2);align-items:center;flex-wrap:wrap}
+.legend .key-line{display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--series);vertical-align:middle;margin-right:5px}
+.legend .key-dot{display:inline-block;width:6px;height:6px;border-radius:50%;border:2px solid var(--series);background:transparent;vertical-align:middle;margin-right:5px}
+.legend .key-band{display:inline-block;width:14px;height:10px;border-radius:2px;background:var(--series-wash2);vertical-align:middle;margin-right:5px}
+.legend label{cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.chart-wrap{position:relative}
+.chart-wrap canvas{display:block;width:100%}
+.chart-wrap .overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+canvas:focus-visible{outline:2px solid var(--series);outline-offset:2px}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+     box-shadow:0 2px 10px rgba(0,0,0,.14);padding:6px 10px;font-size:12px;display:none;z-index:5;max-width:240px}
+.tip .tv{font-size:14px;font-weight:650;display:block}
+.tip .tl{color:var(--ink2);display:block}
+.tip .tk{display:inline-block;width:10px;height:3px;border-radius:2px;background:var(--series);vertical-align:middle;margin-right:5px}
+#brushWrap{margin-top:6px}
+#brushCanvas{cursor:crosshair;touch-action:none}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:1050px){.two-col{grid-template-columns:1fr}}
+details.tables{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 16px}
+details.tables summary{cursor:pointer;font-weight:650;font-size:14px;padding:4px 0}
+.table-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:8px}
+.table-block h4{margin:4px 0 6px;font-size:13px}
+.table-scroll{overflow:auto;max-height:340px;border:1px solid var(--border);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:4px 10px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{position:sticky;top:0;background:var(--surface);color:var(--ink2);font-weight:600;border-bottom:1px solid var(--grid)}
+tbody tr:nth-child(even){background:var(--sel-bg)}
+.foot{color:var(--muted);font-size:12px;line-height:1.6;padding:2px 4px 10px}
+.foot a{color:var(--series);text-decoration:none}
+.foot a:hover{text-decoration:underline}
+.empty{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:40px;text-align:center;color:var(--ink2)}
+.loading-charts .card,.loading-charts .tiles,.loading-charts details.tables{opacity:.55;transition:opacity .15s}
+.err-banner{background:var(--surface);border:1px solid #d03b3b;border-radius:10px;padding:10px 14px;color:var(--ink);display:none}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.note{font-size:11.5px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="title-block">
+    <h1>Georgia Groundwater Explorer</h1>
+    <div class="lab-line">Evaristo Critical Zone Hydrology Lab · University of Georgia</div>
+  </div>
+  <span class="sub" id="headerSub">USGS daily groundwater levels</span>
+  <span class="spacer"></span>
+  <button class="ghost-btn" id="themeBtn" title="Toggle color theme">Theme: Auto</button>
+</header>
+
+<div class="app">
+  <aside aria-label="Well selection">
+    <div class="search-wrap">
+      <input id="searchBox" type="search" placeholder="Search wells — number, name, county, aquifer…"
+             aria-label="Search wells by number, name, county, or aquifer" autocomplete="off">
+    </div>
+    <div class="sort-row">
+      <label for="sortSel">Sort</label>
+      <select id="sortSel">
+        <option value="no">Well number</option>
+        <option value="nm">Well name</option>
+        <option value="len">Record length</option>
+        <option value="wd">Well depth</option>
+        <option value="end">Most recently active</option>
+      </select>
+    </div>
+    <svg id="map" role="img" aria-label="Map of Georgia with well locations"></svg>
+    <div class="list-count" id="listCount"></div>
+    <div class="site-list" id="siteList" role="listbox" aria-label="Monitoring wells"></div>
+  </aside>
+
+  <main id="main">
+    <div class="err-banner" id="errBanner"></div>
+    <div class="empty" id="emptyState">Loading well index…</div>
+
+    <div id="stationView" hidden>
+      <section class="station-head">
+        <h2 id="stName"></h2>
+        <div class="site-no-line">USGS <span id="stNo"></span> · <a id="stLink" target="_blank" rel="noopener">USGS monitoring page ↗</a></div>
+        <div class="chips" id="chips"></div>
+      </section>
+
+      <section class="filter-row" style="margin-top:12px" aria-label="Date range and series filters">
+        <button class="preset" data-preset="full">Full record</button>
+        <button class="preset" data-preset="30">30 yr</button>
+        <button class="preset" data-preset="10">10 yr</button>
+        <button class="preset" data-preset="5">5 yr</button>
+        <button class="preset" data-preset="1">1 yr</button>
+        <select id="statSel" aria-label="Series" hidden></select>
+        <span class="range-readout" id="rangeReadout"></span>
+      </section>
+
+      <div id="scoped" style="display:flex;flex-direction:column;gap:14px;margin-top:12px">
+        <section class="tiles" id="tiles" aria-label="Summary statistics"></section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h3 id="hydroTitle">Water level</h3>
+              <p class="card-sub" id="hydroSub"></p>
+            </div>
+            <div class="legend" id="hydroLegend">
+              <span><span class="key-line"></span>Daily value</span>
+              <label><input type="checkbox" id="discToggle" checked><span class="key-dot"></span>Field measurements</label>
+            </div>
+          </div>
+          <div class="chart-wrap" id="hydroWrap">
+            <canvas id="hydroCanvas" height="320" tabindex="0" role="img"
+                    aria-label="Groundwater level hydrograph. The vertical axis shows depth to water, increasing downward. Use arrow keys to move the reading cursor."></canvas>
+            <canvas id="hydroOverlay" class="overlay" height="320"></canvas>
+            <div class="tip" id="hydroTip"></div>
+          </div>
+          <div id="brushWrap" class="chart-wrap">
+            <canvas id="brushCanvas" height="56" aria-label="Full record overview. Drag to zoom the charts to a date range."></canvas>
+            <canvas id="brushOverlay" class="overlay" height="56"></canvas>
+          </div>
+          <div class="note" id="axisNote"></div>
+          <div class="visually-hidden" id="hydroLive" aria-live="polite"></div>
+        </section>
+
+        <div class="two-col">
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <h3>Seasonal pattern</h3>
+                <p class="card-sub">Distribution of daily water levels by calendar month, selected range</p>
+              </div>
+              <div class="legend"><span><span class="key-line"></span>Median</span><span><span class="key-band"></span>25–75%</span></div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="regimeCanvas" height="230"></canvas>
+              <canvas id="regimeOverlay" class="overlay" height="230"></canvas>
+              <div class="tip" id="regimeTip"></div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <h3>Level duration curve</h3>
+                <p class="card-sub" id="fdcSub">Share of days the water table is at or above each level, selected range</p>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="fdcCanvas" height="230"></canvas>
+              <canvas id="fdcOverlay" class="overlay" height="230"></canvas>
+              <div class="tip" id="fdcTip"></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h3>Annual mean water level</h3>
+              <p class="card-sub" id="annualSub">By water year (Oct–Sep), selected range. Faded markers are partial years.</p>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="annualCanvas" height="200"></canvas>
+            <canvas id="annualOverlay" class="overlay" height="200"></canvas>
+            <div class="tip" id="annualTip"></div>
+          </div>
+        </section>
+
+        <details class="tables">
+          <summary>Data tables (annual, monthly, level percentiles, field measurements)</summary>
+          <div class="table-grid">
+            <div class="table-block"><h4>Annual statistics (water year)</h4><div class="table-scroll" id="annualTable"></div></div>
+            <div class="table-block"><h4>Monthly statistics</h4><div class="table-scroll" id="monthlyTable"></div></div>
+            <div class="table-block"><h4>Level percentiles</h4><div class="table-scroll" id="pctTable"></div></div>
+            <div class="table-block"><h4>Field measurements</h4><div class="table-scroll" id="discTable"></div></div>
+          </div>
+        </details>
+      </div>
+
+      <footer class="foot" id="foot"></footer>
+    </div>
+  </main>
+</div>
+
+<script src="data/sites_index.js"></script>
+<script>
+"use strict";
+/* ============================== utilities ============================== */
+const DAY = 86400000;
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTH_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const PARM_LABELS = {
+  "72019":"Depth to water below land surface",
+  "61055":"Depth to water below measuring point",
+  "62610":"Water level above NGVD29",
+  "62611":"Water level above NAVD88",
+  "72020":"Water-surface elevation above NGVD29",
+  "72150":"Water level above sea level"
+};
+const STAT_LABELS = {"00003":"daily mean","00008":"daily median","00001":"daily maximum","00002":"daily minimum"};
+const DEPTH_PARAMS = new Set(["72019","61055"]);
+const keyParm = k => k.split(":")[0];
+const keyLabel = k => {
+  const [p, s] = k.split(":");
+  return (PARM_LABELS[p] || "Parameter " + p) + " — " + (STAT_LABELS[s] || "statistic " + s);
+};
+const dOf = day => new Date(day * DAY);
+const fmtDate = day => { const d = dOf(day); return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + d.getUTCFullYear(); };
+const yearOf = day => dOf(day).getUTCFullYear();
+const epochDayUTC = (y, m, d) => Date.UTC(y, m, d) / DAY;
+const waterYear = day => { const d = dOf(day); return d.getUTCMonth() >= 9 ? d.getUTCFullYear() + 1 : d.getUTCFullYear(); };
+function fmtLevel(v){
+  if (v == null || !isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a >= 1000) return Math.round(v).toLocaleString("en-US");
+  if (a >= 100) return v.toFixed(1);
+  return v.toFixed(2);
+}
+function fmtAxisLevel(v){
+  const a = Math.abs(v);
+  if (a >= 1000) return Math.round(v).toLocaleString("en-US");
+  if (a >= 10 || v === 0) return String(+v.toFixed(0)) === String(v) ? String(v) : String(+v.toFixed(1));
+  return String(+v.toFixed(2));
+}
+function lowerBound(arr, x){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m] < x) lo = m + 1; else hi = m; } return lo; }
+function quantileSorted(a, q){
+  const n = a.length; if (!n) return null;
+  const pos = (n - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return lo === hi ? a[lo] : a[lo] + (a[hi] - a[lo]) * (pos - lo);
+}
+function niceStep(rough){
+  const p = Math.pow(10, Math.floor(Math.log10(rough)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= rough) return m * p;
+  return 10 * p;
+}
+function linTicks(lo, hi){
+  const step = niceStep((hi - lo) / 5);
+  const ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) ticks.push(+v.toFixed(10));
+  return ticks;
+}
+const debounce = (fn, ms) => { let t; const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; d.cancel = () => clearTimeout(t); return d; };
+
+/* ============================== theme ============================== */
+const themeBtn = document.getElementById("themeBtn");
+const THEMES = ["auto", "light", "dark"];
+let themeIdx = 0;
+function applyTheme(){
+  const t = THEMES[themeIdx];
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  themeBtn.textContent = "Theme: " + t[0].toUpperCase() + t.slice(1);
+  renderAll();
+}
+themeBtn.addEventListener("click", () => { themeIdx = (themeIdx + 1) % 3; applyTheme(); });
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderAll());
+function colors(){
+  const cs = getComputedStyle(document.documentElement);
+  const g = n => cs.getPropertyValue(n).trim();
+  return { surface:g("--surface"), ink:g("--ink"), ink2:g("--ink2"), muted:g("--muted"),
+           grid:g("--grid"), axis:g("--axis"), series:g("--series"),
+           wash:g("--series-wash"), wash2:g("--series-wash2"), lift:g("--lift") };
+}
+
+/* ============================== index & state ============================== */
+const INDEX = window.__WELL_INDEX;
+const SITES = INDEX ? INDEX.sites : [];
+const byNo = {};
+SITES.forEach(s => byNo[s.no] = s);
+
+const state = {
+  site: null,
+  skey: null,          // series key "parm:stat"
+  days: null, vals: null,
+  discDays: null, discVals: null, discByDay: null,
+  range: null,
+  showDisc: true,
+  loadToken: 0
+};
+const isDepth = () => state.skey && DEPTH_PARAMS.has(keyParm(state.skey));
+/* Full explorable extent: the daily series PLUS any field measurements that
+   fall before/after it (340 wells have tape-downs outside the recorder era). */
+function fullExtent(){
+  const p = state.site.stats[state.skey];
+  let b0 = p[0], b1 = p[1];
+  if (state.discDays && state.discDays.length){
+    b0 = Math.min(b0, state.discDays[0]);
+    b1 = Math.max(b1, state.discDays[state.discDays.length - 1]);
+  }
+  return [b0, b1];
+}
+function hideAllTips(){
+  ["hydroTip", "regimeTip", "fdcTip", "annualTip"].forEach(id => {
+    const t = document.getElementById(id);
+    if (t) t.style.display = "none";
+  });
+  ["hydroOverlay", "regimeOverlay", "fdcOverlay", "annualOverlay"].forEach(id => {
+    const ov = document.getElementById(id);
+    if (ov) ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
+  });
+}
+
+/* ============================== header summary ============================== */
+(function headerSummary(){
+  if (!INDEX) return;
+  let total = 0, disc = 0, minB = Infinity, maxE = -Infinity;
+  SITES.forEach(s => { const p = s.stats[s.pref]; total += p[2]; disc += s.nD + s.nDo; minB = Math.min(minB, p[0]); maxE = Math.max(maxE, p[1]); });
+  document.getElementById("headerSub").textContent =
+    SITES.length + " monitoring wells · " + (total/1e6).toFixed(1) + "M daily water-level records · " +
+    disc.toLocaleString("en-US") + " field measurements · " + yearOf(minB) + "–" + yearOf(maxE) +
+    " · retrieved " + INDEX.generated;
+})();
+
+/* ============================== sidebar ============================== */
+const searchBox = document.getElementById("searchBox");
+const sortSel = document.getElementById("sortSel");
+const siteListEl = document.getElementById("siteList");
+const listCountEl = document.getElementById("listCount");
+let filtered = SITES.slice();
+
+function sortSites(arr){
+  const k = sortSel.value;
+  const c = arr.slice();
+  if (k === "no") c.sort((a,b) => a.no < b.no ? -1 : 1);
+  else if (k === "nm") c.sort((a,b) => a.nm.localeCompare(b.nm));
+  else if (k === "len") c.sort((a,b) => b.stats[b.pref][2] - a.stats[a.pref][2]);
+  else if (k === "wd") c.sort((a,b) => (b.wd||0) - (a.wd||0));
+  else if (k === "end") c.sort((a,b) => b.stats[b.pref][1] - a.stats[a.pref][1]);
+  return c;
+}
+function applyFilter(){
+  const q = searchBox.value.trim().toLowerCase();
+  filtered = !q ? SITES.slice() :
+    SITES.filter(s => (s.no + " " + s.nm + " " + s.cty + " " + s.naq + " " + s.laq).toLowerCase().includes(q));
+  filtered = sortSites(filtered);
+  renderList();
+  updateMapDim();
+}
+function renderList(){
+  const active = document.activeElement;
+  const focusedNo = active && active.classList && active.classList.contains("site-item") ? active.dataset.no : null;
+  siteListEl.textContent = "";
+  listCountEl.textContent = filtered.length + " of " + SITES.length + " wells";
+  const frag = document.createDocumentFragment();
+  filtered.forEach(s => {
+    const btn = document.createElement("button");
+    btn.className = "site-item" + (state.site && state.site.no === s.no ? " sel" : "");
+    btn.setAttribute("role", "option");
+    btn.setAttribute("aria-selected", state.site && state.site.no === s.no ? "true" : "false");
+    btn.dataset.no = s.no;
+    const l1 = document.createElement("span"); l1.className = "no"; l1.textContent = s.nm || s.no;
+    const l2 = document.createElement("span"); l2.className = "nm"; l2.textContent = s.no + (s.cty ? " · " + s.cty : "");
+    const p = s.stats[s.pref];
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = yearOf(p[0]) + "–" + yearOf(p[1]) + " · " + p[2].toLocaleString("en-US") + " days" +
+      (s.wd ? " · " + s.wd.toLocaleString("en-US") + " ft deep" : "");
+    btn.append(l1, document.createTextNode(" "), l2, meta);
+    btn.addEventListener("click", () => selectSite(s.no));
+    frag.appendChild(btn);
+  });
+  siteListEl.appendChild(frag);
+  if (focusedNo){
+    const nb = siteListEl.querySelector('.site-item[data-no="' + focusedNo + '"]');
+    if (nb) nb.focus();
+  }
+}
+const filterDebounced = debounce(applyFilter, 120);
+searchBox.addEventListener("input", filterDebounced);
+searchBox.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" || e.key === "Enter"){ filterDebounced.cancel(); applyFilter(); }
+  if (e.key === "ArrowDown"){ const f = siteListEl.querySelector(".site-item"); if (f){ f.focus(); e.preventDefault(); } }
+  if (e.key === "Enter" && filtered.length){ selectSite(filtered[0].no); }
+});
+siteListEl.addEventListener("keydown", e => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const items = [...siteListEl.querySelectorAll(".site-item")];
+  const i = items.indexOf(document.activeElement);
+  if (i === -1) return;
+  const j = e.key === "ArrowDown" ? Math.min(i + 1, items.length - 1) : Math.max(i - 1, 0);
+  items[j].focus(); e.preventDefault();
+});
+sortSel.addEventListener("change", applyFilter);
+
+/* ============================== map ============================== */
+const mapSvg = document.getElementById("map");
+const MAPW = 296, MAPH = 300;
+let mapDots = {};
+(function buildMap(){
+  if (!INDEX) return;
+  const B = INDEX.boundary;
+  const lats = [], lons = [];
+  B.forEach(([x, y]) => { lons.push(x); lats.push(y); });
+  SITES.forEach(s => { if (s.lat && s.lon){ lats.push(s.lat); lons.push(s.lon); } });
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const midLat = (minLat + maxLat) / 2 * Math.PI / 180;
+  const kx = Math.cos(midLat);
+  const w = (maxLon - minLon) * kx, h = maxLat - minLat;
+  const pad = 8;
+  const sc = Math.min((MAPW - 2*pad) / w, (MAPH - 2*pad) / h);
+  const ox = (MAPW - w * sc) / 2, oy = (MAPH - h * sc) / 2;
+  const px = lon => ox + (lon - minLon) * kx * sc;
+  const py = lat => oy + (maxLat - lat) * sc;
+  mapSvg.setAttribute("viewBox", "0 0 " + MAPW + " " + MAPH);
+  const NS = "http://www.w3.org/2000/svg";
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("class", "outline");
+  path.setAttribute("d", B.map(([lon, lat], i) => (i ? "L" : "M") + px(lon).toFixed(1) + " " + py(lat).toFixed(1)).join("") + "Z");
+  mapSvg.appendChild(path);
+  SITES.forEach(s => {
+    if (s.lat == null || s.lon == null) return;
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("class", "dot");
+    c.setAttribute("cx", px(s.lon).toFixed(1));
+    c.setAttribute("cy", py(s.lat).toFixed(1));
+    c.setAttribute("r", "3.2");
+    const t = document.createElementNS(NS, "title");
+    t.textContent = (s.nm || s.no) + " · " + s.no;
+    c.appendChild(t);
+    c.addEventListener("click", () => selectSite(s.no));
+    mapSvg.appendChild(c);
+    mapDots[s.no] = c;
+  });
+})();
+function updateMapDim(){
+  const inSet = new Set(filtered.map(s => s.no));
+  for (const no in mapDots){
+    mapDots[no].classList.toggle("dim", !inSet.has(no));
+    mapDots[no].classList.toggle("sel", state.site && state.site.no === no);
+  }
+  if (state.site && mapDots[state.site.no]) mapSvg.appendChild(mapDots[state.site.no]);
+}
+
+/* ============================== site loading & selection ============================== */
+const errBanner = document.getElementById("errBanner");
+window.__onWellData = function(){};
+
+function selectSite(no){
+  const s = byNo[no];
+  if (!s) return;
+  state.site = s;
+  state.skey = s.pref;
+  history.replaceState(null, "", "#site=" + no);
+  document.getElementById("emptyState").hidden = true;
+  document.getElementById("stationView").hidden = false;
+  renderStationHead();
+  renderStatSelect();
+  renderList();
+  updateMapDim();
+  loadAndShow();
+}
+function loadAndShow(){
+  const no = state.site.no;
+  const token = ++state.loadToken;
+  errBanner.style.display = "none";
+  if (window.__WELL_DATA && window.__WELL_DATA[no]){ onDataReady(no, token); return; }
+  // invalidate the outgoing well's series so nothing renders or answers input on mixed state;
+  // the previous pixels stay on screen (dimmed) until the new data arrives
+  state.days = null; state.vals = null; state.range = null;
+  state.discDays = null; state.discVals = null; state.discByDay = null;
+  hydroCache = null; brushCache = null; regimeCache = null; fdcCache = null; annualCache = null;
+  hideAllTips();
+  hydroCursor = null;
+  document.getElementById("statSel").disabled = true;
+  document.getElementById("main").classList.add("loading-charts");
+  const sc = document.createElement("script");
+  sc.src = "data/sites/USGS_" + no + ".js";
+  sc.onload = () => onDataReady(no, token);
+  sc.onerror = () => {
+    if (token !== state.loadToken) return;
+    document.getElementById("main").classList.remove("loading-charts");
+    document.getElementById("statSel").disabled = false;
+    document.getElementById("stationView").hidden = true;
+    const empty = document.getElementById("emptyState");
+    empty.textContent = "Select a well from the list.";
+    empty.hidden = false;
+    errBanner.textContent = "Could not load data file data/sites/USGS_" + no +
+      ".js — keep the data folder next to this HTML file.";
+    errBanner.style.display = "block";
+  };
+  document.head.appendChild(sc);
+}
+function onDataReady(no, token){
+  if (token !== state.loadToken || state.site.no !== no) return;
+  document.getElementById("main").classList.remove("loading-charts");
+  document.getElementById("statSel").disabled = false;
+  hideAllTips();
+  hydroCursor = null;
+  buildSeriesArrays();
+  state.range = fullExtent();
+  setPresetPressed("full");
+  renderAll();
+}
+function buildSeriesArrays(){
+  const data = window.__WELL_DATA[state.site.no];
+  let ser = data.series[state.skey];
+  if (!ser){ state.skey = Object.keys(data.series)[0]; ser = data.series[state.skey]; }
+  let n = 0;
+  ser.segs.forEach(([, vs]) => vs.forEach(v => { if (v != null) n++; }));
+  const days = new Int32Array(n), vals = new Float64Array(n);
+  let i = 0;
+  ser.segs.forEach(([start, vs]) => {
+    for (let k = 0; k < vs.length; k++){
+      const v = vs[k];
+      if (v == null) continue;
+      days[i] = start + k; vals[i] = v; i++;
+    }
+  });
+  state.days = days; state.vals = vals;
+  // discrete points are stored for the preferred parameter; show them only
+  // when the selected series is that same parameter
+  const disc = keyParm(state.skey) === keyParm(state.site.pref) ? (data.disc || []) : [];
+  const dd = new Int32Array(disc.length), dv = new Float64Array(disc.length);
+  const byDay = new Map();
+  disc.forEach((p, j) => { dd[j] = p[0]; dv[j] = p[1]; byDay.set(p[0], p[1]); });
+  state.discDays = dd; state.discVals = dv; state.discByDay = byDay;
+}
+
+/* ============================== station head, chips, series select ============================== */
+function renderStationHead(){
+  const s = state.site;
+  document.getElementById("stName").textContent = s.nm || ("Well " + s.no);
+  document.getElementById("stNo").textContent = s.no;
+  document.getElementById("stLink").href = "https://waterdata.usgs.gov/monitoring-location/" + s.no + "/";
+  const chips = document.getElementById("chips");
+  chips.textContent = "";
+  const p = s.stats[s.pref];
+  const items = [
+    ["Period of record", yearOf(p[0]) + "–" + yearOf(p[1])],
+    ["Daily values", p[2].toLocaleString("en-US")],
+    (s.nD + s.nDo) > 0 ? ["Field measurements", (s.nD + s.nDo).toLocaleString("en-US")] : null,
+    s.wd != null ? ["Well depth", s.wd.toLocaleString("en-US") + " ft"] : null,
+    s.naq ? ["Aquifer", s.naq] : null,
+    s.laq ? [/^\d/.test(s.laq) ? "Local aquifer code" : "Local aquifer", s.laq] : null,
+    s.cty ? ["County", s.cty] : null,
+    s.alt != null ? ["Land-surface altitude", s.alt.toLocaleString("en-US") + " ft " + (s.altd || "")] : null,
+    (s.lat != null) ? ["Location", s.lat.toFixed(4) + "°, " + s.lon.toFixed(4) + "°"] : null
+  ];
+  items.forEach(it => {
+    if (!it) return;
+    const c = document.createElement("span"); c.className = "chip";
+    const b = document.createElement("b"); b.textContent = it[1];
+    c.textContent = it[0] + ": "; c.appendChild(b);
+    chips.appendChild(c);
+  });
+}
+function renderStatSelect(){
+  const sel = document.getElementById("statSel");
+  const keys = Object.keys(state.site.stats).sort();
+  sel.textContent = "";
+  if (keys.length < 2){ sel.hidden = true; return; }
+  sel.hidden = false;
+  keys.forEach(k => {
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = keyLabel(k) + " (" + state.site.stats[k][2].toLocaleString("en-US") + " days)";
+    sel.appendChild(o);
+  });
+  sel.value = state.skey;
+}
+document.getElementById("statSel").addEventListener("change", e => {
+  state.skey = e.target.value;
+  if (!window.__WELL_DATA || !window.__WELL_DATA[state.site.no]) return;
+  hideAllTips();
+  hydroCursor = null;
+  buildSeriesArrays();
+  state.range = fullExtent();
+  setPresetPressed("full");
+  renderAll();
+});
+document.getElementById("discToggle").addEventListener("change", e => {
+  state.showDisc = e.target.checked;
+  renderHydro();
+});
+
+/* ============================== filter row ============================== */
+function setPresetPressed(which){
+  document.querySelectorAll(".preset").forEach(b => b.setAttribute("aria-pressed", b.dataset.preset === which ? "true" : "false"));
+}
+document.querySelectorAll(".preset").forEach(btn => btn.addEventListener("click", () => {
+  if (!state.days) return;
+  const [b0, b1] = fullExtent();
+  if (btn.dataset.preset === "full") state.range = [b0, b1];
+  else {
+    const yrs = +btn.dataset.preset;
+    state.range = [Math.max(b0, b1 - Math.round(yrs * 365.25)), b1];
+  }
+  setPresetPressed(btn.dataset.preset);
+  renderAll();
+}));
+
+/* ============================== canvas helpers ============================== */
+function setupCanvas(canvas, cssH){
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.parentElement.clientWidth || 600;
+  canvas.style.height = cssH + "px";
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, W: w, H: cssH };
+}
+function visibleIndexRange(){
+  const [r0, r1] = state.range;
+  return [lowerBound(state.days, r0), lowerBound(state.days, r1 + 1)];
+}
+function visibleDiscRange(){
+  const [r0, r1] = state.range;
+  return [lowerBound(state.discDays, r0), lowerBound(state.discDays, r1 + 1)];
+}
+function timeTicks(r0, r1){
+  const span = r1 - r0;
+  const ticks = [];
+  if (span > 3 * 365){
+    const y0 = yearOf(r0), y1 = yearOf(r1);
+    const step = [1,2,5,10,20,50].find(s => (y1 - y0) / s <= 8) || 100;
+    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step){
+      const d = epochDayUTC(y, 0, 1);
+      if (d >= r0 && d <= r1) ticks.push([d, String(y)]);
+    }
+  } else if (span > 92){
+    const stepM = [1,2,3,6].find(s => span / 30.4 / s <= 9) || 12;
+    const d0 = dOf(r0); let y = d0.getUTCFullYear(), m = d0.getUTCMonth();
+    if (r0 !== epochDayUTC(y, m, 1)){ m++; if (m > 11){ m = 0; y++; } }
+    for (;;){
+      const ed = epochDayUTC(y, m, 1);
+      if (ed > r1) break;
+      if (ed >= r0 && m % stepM === 0) ticks.push([ed, MONTHS[m] + " ’" + String(y).slice(2)]);
+      m++; if (m > 11){ m = 0; y++; }
+    }
+  } else {
+    const stepD = [1,2,7,14].find(s => span / s <= 10) || 21;
+    for (let d = Math.ceil(r0 / stepD) * stepD; d <= r1; d += stepD){
+      const dd = dOf(d);
+      ticks.push([d, MONTHS[dd.getUTCMonth()] + " " + dd.getUTCDate()]);
+    }
+  }
+  return ticks;
+}
+/* Level scale: for depth parameters the axis is inverted (shallow at top,
+   deep at bottom) so "up" always reads as a rising water table. */
+function levelDomain(a, b, includeDisc){
+  let mn = Infinity, mx = -Infinity;
+  for (let i = a; i < b; i++){ const v = state.vals[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  if (includeDisc && state.showDisc && state.discDays && state.discDays.length){
+    const [da, db] = visibleDiscRange();
+    for (let i = da; i < db; i++){ const v = state.discVals[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  }
+  if (mn === Infinity){ mn = 0; mx = 1; }
+  if (mx - mn < 0.5){ const mid = (mn + mx) / 2; mn = mid - 0.5; mx = mid + 0.5; }
+  const pad = (mx - mn) * 0.06;
+  return { lo: mn - pad, hi: mx + pad };
+}
+function makeY(dom, padT, plotH){
+  const inv = isDepth();
+  return v => inv
+    ? padT + (v - dom.lo) / (dom.hi - dom.lo) * plotH        // depth grows downward
+    : padT + plotH - (v - dom.lo) / (dom.hi - dom.lo) * plotH;
+}
+
+/* ============================== hydrograph ============================== */
+const PADL = 56, PADR = 14, PADT = 10, PADB = 26;
+let hydroCache = null;
+function renderHydro(){
+  if (!state.days) return;
+  const C = colors();
+  const canvas = document.getElementById("hydroCanvas");
+  const { ctx, W, H } = setupCanvas(canvas, 320);
+  setupCanvas(document.getElementById("hydroOverlay"), 320);
+  const plotW = W - PADL - PADR, plotH = H - PADT - PADB;
+  const [r0, r1] = state.range;
+  const span = Math.max(1, r1 - r0);
+  const x = d => PADL + (d - r0) / span * plotW;
+  const [a, b] = visibleIndexRange();
+  const dom = levelDomain(a, b, true);
+  const y = makeY(dom, PADT, plotH);
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.fillStyle = C.muted;
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  linTicks(dom.lo, dom.hi).forEach(v => {
+    const yy = Math.round(y(v)) + 0.5;
+    if (yy < PADT - 2 || yy > PADT + plotH + 2) return;
+    ctx.beginPath(); ctx.moveTo(PADL, yy); ctx.lineTo(W - PADR, yy); ctx.stroke();
+    ctx.fillText(fmtAxisLevel(v), PADL - 6, yy);
+  });
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  timeTicks(r0, r1).forEach(([d, lbl]) => {
+    const xx = Math.round(x(d)) + 0.5;
+    ctx.strokeStyle = C.grid;
+    ctx.beginPath(); ctx.moveTo(xx, PADT); ctx.lineTo(xx, PADT + plotH); ctx.stroke();
+    ctx.fillText(lbl, xx, PADT + plotH + 8);
+  });
+  ctx.strokeStyle = C.axis;
+  ctx.beginPath(); ctx.moveTo(PADL, PADT + plotH + 0.5); ctx.lineTo(W - PADR, PADT + plotH + 0.5); ctx.stroke();
+
+  const nVis = b - a;
+  if (nVis > 0){
+    if (nVis > plotW * 1.5){
+      const colMin = new Float64Array(plotW).fill(Infinity);
+      const colMax = new Float64Array(plotW).fill(-Infinity);
+      for (let i = a; i < b; i++){
+        const v = state.vals[i];
+        const cix = Math.min(plotW - 1, Math.max(0, Math.floor((state.days[i] - r0) / span * plotW)));
+        if (v < colMin[cix]) colMin[cix] = v;
+        if (v > colMax[cix]) colMax[cix] = v;
+      }
+      ctx.strokeStyle = C.series; ctx.lineWidth = 1; ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      for (let cix = 0; cix < plotW; cix++){
+        if (colMin[cix] === Infinity) continue;
+        const xx = PADL + cix + 0.5;
+        let y1 = y(colMin[cix]), y2 = y(colMax[cix]);
+        let yTop = Math.min(y1, y2), yBot = Math.max(y1, y2);
+        if (yBot - yTop < 1) yBot = yTop + 1;
+        ctx.moveTo(xx, yTop); ctx.lineTo(xx, yBot);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    } else {
+      ctx.strokeStyle = C.series; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath();
+      let pen = false;
+      for (let i = a; i < b; i++){
+        const gap = i > a && (state.days[i] - state.days[i-1] > 1);
+        const xx = x(state.days[i]), yy = y(state.vals[i]);
+        if (!pen || gap){ ctx.moveTo(xx, yy); pen = true; }
+        else ctx.lineTo(xx, yy);
+      }
+      ctx.stroke();
+      // at high time compression short runs collapse to sub-pixel segments,
+      // so draw every reading as a dot; otherwise dot only isolated readings
+      ctx.fillStyle = C.series;
+      if (span / plotW > 3){
+        for (let i = a; i < b; i++){
+          ctx.beginPath(); ctx.arc(x(state.days[i]), y(state.vals[i]), 2, 0, 7); ctx.fill();
+        }
+      } else {
+        for (let i = a; i < b; i++){
+          const prevGap = i === a || state.days[i] - state.days[i-1] > 1;
+          const nextGap = i === b - 1 || state.days[i+1] - state.days[i] > 1;
+          if (prevGap && nextGap){
+            ctx.beginPath(); ctx.arc(x(state.days[i]), y(state.vals[i]), 2.5, 0, 7); ctx.fill();
+          }
+        }
+      }
+      if (nVis <= 80){
+        for (let i = a; i < b; i++){
+          const xx = x(state.days[i]), yy = y(state.vals[i]);
+          ctx.beginPath(); ctx.arc(xx, yy, 6, 0, 7); ctx.fillStyle = C.surface; ctx.fill();
+          ctx.beginPath(); ctx.arc(xx, yy, 4, 0, 7); ctx.fillStyle = C.series; ctx.fill();
+        }
+      }
+    }
+  }
+  // discrete field measurements overlay — hollow circles so they read as a
+  // different mark than the filled daily line/dots, independent of color
+  let nDiscVis = 0;
+  if (state.showDisc && state.discDays && state.discDays.length){
+    const [da, db] = visibleDiscRange();
+    nDiscVis = db - da;
+    if (nDiscVis > 0){
+      const dense = nDiscVis > 600;
+      ctx.lineWidth = 2; ctx.strokeStyle = C.series;
+      for (let i = da; i < db; i++){
+        const xx = x(state.discDays[i]), yy = y(state.discVals[i]);
+        if (dense){
+          ctx.fillStyle = C.series;
+          ctx.fillRect(xx - 1.5, yy - 1.5, 3, 3);
+        } else {
+          ctx.beginPath(); ctx.arc(xx, yy, 4, 0, 7);
+          ctx.fillStyle = C.surface; ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  document.getElementById("hydroTitle").textContent =
+    keyLabel(state.skey).replace(/^(.)/, c => c.toUpperCase()) + ", ft";
+  document.getElementById("hydroSub").textContent =
+    nVis.toLocaleString("en-US") + " daily values" +
+    (nDiscVis ? " · " + nDiscVis.toLocaleString("en-US") + " field measurements" : "") +
+    ", " + fmtDate(r0) + " – " + fmtDate(r1);
+  document.getElementById("axisNote").textContent = isDepth()
+    ? "Vertical axis is depth below land surface — it increases downward, so higher on the chart means a shallower (rising) water table. Negative depths are artesian (above land surface)."
+    : "";
+  hydroCache = { r0, r1, span, W, H, plotW, plotH, x, y, a, b, dom };
+  renderBrush();
+}
+
+/* --------- hydro crosshair / tooltip / keyboard --------- */
+const hydroTip = document.getElementById("hydroTip");
+let hydroCursor = null;
+function setTip(tipEl, wrap, px, py, rows){
+  tipEl.textContent = "";
+  rows.forEach(([cls, txt, key]) => {
+    const sp = document.createElement("span");
+    sp.className = cls;
+    if (key){ const k = document.createElement("span"); k.className = "tk"; sp.appendChild(k); }
+    sp.appendChild(document.createTextNode(txt));
+    tipEl.appendChild(sp);
+  });
+  tipEl.style.display = "block";
+  const r = wrap.getBoundingClientRect();
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+  let lx = px + 14; if (lx + tw > r.width - 4) lx = px - tw - 14;
+  lx = Math.max(4, Math.min(lx, r.width - tw - 4));
+  let ly = Math.max(4, Math.min(py - th / 2, r.height - th - 4));
+  tipEl.style.left = lx + "px"; tipEl.style.top = ly + "px";
+}
+function hydroShowCursor(day, fromKeyboard){
+  if (!hydroCache || !state.days) return;
+  const { r0, r1, x, y, plotH, W, H } = hydroCache;
+  day = Math.max(r0, Math.min(r1, day));
+  let i = lowerBound(state.days, day);
+  if (i >= state.days.length) i = state.days.length - 1;
+  if (i > 0 && Math.abs(state.days[i-1] - day) <= Math.abs(state.days[i] - day)) i--;
+  const hasData = i >= 0 && i < state.days.length && Math.abs(state.days[i] - day) <= 31 &&
+                  state.days[i] >= r0 && state.days[i] <= r1;
+  const ov = document.getElementById("hydroOverlay");
+  const dpr = window.devicePixelRatio || 1;
+  const octx = ov.getContext("2d");
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, W, H);
+  const C = colors();
+  const showDay = hasData ? state.days[i] : day;
+  const xx = Math.round(x(showDay)) + 0.5;
+  octx.strokeStyle = C.axis; octx.lineWidth = 1;
+  octx.beginPath(); octx.moveTo(xx, PADT); octx.lineTo(xx, PADT + plotH); octx.stroke();
+  const rows = [];
+  if (hasData){
+    const v = state.vals[i];
+    const yy = y(v);
+    octx.beginPath(); octx.arc(xx, yy, 6, 0, 7); octx.fillStyle = C.surface; octx.fill();
+    octx.beginPath(); octx.arc(xx, yy, 4, 0, 7); octx.fillStyle = C.series; octx.fill();
+    rows.push(["tv", fmtLevel(v) + " ft", true]);
+    rows.push(["tl", fmtDate(showDay) + " · " + keyLabel(state.skey)]);
+    if (state.showDisc && state.discByDay && state.discByDay.has(showDay)){
+      rows.push(["tl", "Field measurement: " + fmtLevel(state.discByDay.get(showDay)) + " ft"]);
+    }
+  } else {
+    rows.push(["tv", "No record", false]);
+    rows.push(["tl", fmtDate(day)]);
+    if (state.showDisc && state.discByDay && state.discByDay.has(day)){
+      rows.push(["tl", "Field measurement: " + fmtLevel(state.discByDay.get(day)) + " ft"]);
+    }
+  }
+  setTip(hydroTip, document.getElementById("hydroWrap"), x(showDay), PADT + plotH / 2, rows);
+  hydroCursor = showDay;
+  if (fromKeyboard){
+    document.getElementById("hydroLive").textContent =
+      hasData ? fmtDate(showDay) + ": " + fmtLevel(state.vals[i]) + " feet" : fmtDate(day) + ": no record";
+  }
+}
+function hydroHideCursor(){
+  hydroTip.style.display = "none";
+  hydroCursor = null;
+  const ov = document.getElementById("hydroOverlay");
+  ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
+}
+const hydroCanvasEl = document.getElementById("hydroCanvas");
+hydroCanvasEl.addEventListener("pointermove", e => {
+  if (!hydroCache) return;
+  const r = hydroCanvasEl.getBoundingClientRect();
+  const day = hydroCache.r0 + (e.clientX - r.left - PADL) / hydroCache.plotW * hydroCache.span;
+  hydroShowCursor(Math.round(day), false);
+});
+hydroCanvasEl.addEventListener("pointerleave", hydroHideCursor);
+hydroCanvasEl.addEventListener("keydown", e => {
+  if (!hydroCache) return;
+  const step = e.shiftKey ? 30 : 1;
+  let day = hydroCursor == null ? hydroCache.r1 : hydroCursor;
+  if (e.key === "ArrowLeft") day -= step;
+  else if (e.key === "ArrowRight") day += step;
+  else if (e.key === "Home") day = hydroCache.r0;
+  else if (e.key === "End") day = hydroCache.r1;
+  else if (e.key === "Escape"){ hydroHideCursor(); return; }
+  else return;
+  e.preventDefault();
+  hydroShowCursor(day, true);
+});
+hydroCanvasEl.addEventListener("focus", () => { if (hydroCache && hydroCursor == null) hydroShowCursor(hydroCache.r1, true); });
+hydroCanvasEl.addEventListener("blur", hydroHideCursor);
+
+/* ============================== brush ============================== */
+const brushCanvasEl = document.getElementById("brushCanvas");
+let brushCache = null;
+function renderBrush(){
+  if (!state.days || !state.days.length) return;
+  const C = colors();
+  const { ctx, W, H } = setupCanvas(brushCanvasEl, 56);
+  setupCanvas(document.getElementById("brushOverlay"), 56);
+  const [e0, e1] = fullExtent();
+  const b0 = e0, b1 = Math.max(e1, e0 + 1);
+  const x = d => (d - b0) / (b1 - b0) * W;
+  const colMin = new Float64Array(W).fill(Infinity);
+  const colMax = new Float64Array(W).fill(-Infinity);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < state.days.length; i++){
+    const v = state.vals[i];
+    const cix = Math.min(W - 1, Math.max(0, Math.floor(x(state.days[i]))));
+    if (v < colMin[cix]) colMin[cix] = v;
+    if (v > colMax[cix]) colMax[cix] = v;
+    if (v < lo) lo = v; if (v > hi) hi = v;
+  }
+  if (state.discDays){
+    for (let i = 0; i < state.discDays.length; i++){
+      const v = state.discVals[i];
+      if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+  }
+  if (hi - lo < 0.5){ hi = lo + 0.5; }
+  const inv = isDepth();
+  const ys = v => {
+    const f = (v - lo) / (hi - lo);
+    return inv ? 3 + f * (H - 8) : 3 + (1 - f) * (H - 8);
+  };
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = C.series; ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let cix = 0; cix < W; cix++){
+    if (colMin[cix] === Infinity) continue;
+    const y1 = ys(colMin[cix]), y2 = ys(colMax[cix]);
+    let yTop = Math.min(y1, y2), yBot = Math.max(y1, y2);
+    if (yBot - yTop < 1) yBot = yTop + 1;
+    ctx.moveTo(cix + 0.5, yTop); ctx.lineTo(cix + 0.5, yBot);
+  }
+  ctx.stroke(); ctx.globalAlpha = 1;
+  // field measurements — visible in the strip even where no daily record exists
+  if (state.discDays && state.discDays.length){
+    ctx.fillStyle = C.series; ctx.globalAlpha = 0.45;
+    for (let i = 0; i < state.discDays.length; i++){
+      const cx = x(state.discDays[i]);
+      ctx.fillRect(cx - 0.75, ys(state.discVals[i]) - 1, 1.5, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = C.axis;
+  ctx.beginPath(); ctx.moveTo(0, H - 0.5); ctx.lineTo(W, H - 0.5); ctx.stroke();
+  ctx.font = "10px system-ui, sans-serif"; ctx.fillStyle = C.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const y0 = yearOf(b0), y1 = yearOf(b1);
+  const stepY = [5,10,20,25,50].find(s => (y1 - y0) / s <= 8) || 100;
+  for (let yy = Math.ceil(y0 / stepY) * stepY; yy <= y1; yy += stepY){
+    const d = epochDayUTC(yy, 0, 1);
+    if (d >= b0 && d <= b1) ctx.fillText(String(yy), x(d), 2);
+  }
+  brushCache = { b0, b1, W, H, x };
+  drawBrushWindow();
+}
+function drawBrushWindow(){
+  if (!brushCache) return;
+  const C = colors();
+  const ov = document.getElementById("brushOverlay");
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = ov.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const { W, H, x } = brushCache;
+  ctx.clearRect(0, 0, W, H);
+  const x0 = x(state.range[0]), x1 = x(state.range[1]);
+  ctx.fillStyle = C.lift;
+  ctx.fillRect(0, 0, Math.max(0, x0), H);
+  ctx.fillRect(Math.min(W, x1), 0, W - Math.min(W, x1), H);
+  ctx.strokeStyle = C.series; ctx.lineWidth = 2;
+  ctx.strokeRect(x0 + 1, 1, Math.max(2, x1 - x0) - 2, H - 2);
+  ctx.fillStyle = C.series;
+  [[x0], [x1]].forEach(([hx]) => { ctx.fillRect(hx - 2, H / 2 - 8, 4, 16); });
+  document.getElementById("rangeReadout").textContent =
+    fmtDate(state.range[0]) + " – " + fmtDate(state.range[1]);
+}
+let brushDrag = null;
+brushCanvasEl.style.touchAction = "none";
+function pxToDay(px){
+  const { b0, b1, W } = brushCache;
+  return Math.round(b0 + Math.max(0, Math.min(W, px)) / W * (b1 - b0));
+}
+brushCanvasEl.addEventListener("pointerdown", e => {
+  if (!brushCache) return;
+  brushCanvasEl.setPointerCapture(e.pointerId);
+  const r = brushCanvasEl.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const { x } = brushCache;
+  const x0 = x(state.range[0]), x1 = x(state.range[1]);
+  if (Math.abs(px - x0) < 8) brushDrag = { mode: "l" };
+  else if (Math.abs(px - x1) < 8) brushDrag = { mode: "r" };
+  else if (px > x0 && px < x1) brushDrag = { mode: "pan", startPx: px, r0: state.range[0], r1: state.range[1] };
+  else brushDrag = { mode: "new", anchor: pxToDay(px) };
+  e.preventDefault();
+});
+brushCanvasEl.addEventListener("pointermove", e => {
+  if (!brushDrag || !brushCache) return;
+  const r = brushCanvasEl.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const { b0, b1, W } = brushCache;
+  const day = pxToDay(px);
+  let [r0, r1] = state.range;
+  if (brushDrag.mode === "l") r0 = Math.min(day, r1 - 5);
+  else if (brushDrag.mode === "r") r1 = Math.max(day, r0 + 5);
+  else if (brushDrag.mode === "pan"){
+    const shift = Math.round((px - brushDrag.startPx) / W * (b1 - b0));
+    const len = brushDrag.r1 - brushDrag.r0;
+    r0 = Math.max(b0, Math.min(b1 - len, brushDrag.r0 + shift));
+    r1 = r0 + len;
+  } else { r0 = Math.min(brushDrag.anchor, day); r1 = Math.max(brushDrag.anchor, day, r0 + 5); }
+  state.range = [Math.max(b0, r0), Math.min(b1, r1)];
+  setPresetPressed("none");
+  renderHydro();
+});
+["pointerup", "pointercancel"].forEach(ev => brushCanvasEl.addEventListener(ev, () => {
+  if (!brushDrag) return;
+  brushDrag = null;
+  renderAll();
+}));
+
+/* ============================== stat tiles ============================== */
+function visibleSortedVals(){
+  const [a, b] = visibleIndexRange();
+  const arr = Array.from(state.vals.slice(a, b));
+  arr.sort((x, y) => x - y);
+  return arr;
+}
+function trendPerYear(){
+  const [a, b] = visibleIndexRange();
+  const n = b - a;
+  if (n < 60) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = a; i < b; i++){
+    const t = state.days[i] / 365.25;
+    sx += t; sy += state.vals[i]; sxx += t * t; sxy += t * state.vals[i];
+  }
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  return (n * sxy - sx * sy) / denom;   // ft per year in the parameter's own sense
+}
+function renderTiles(sorted){
+  const el = document.getElementById("tiles");
+  el.textContent = "";
+  const [a, b] = visibleIndexRange();
+  const n = b - a;
+  const [r0, r1] = state.range;
+  const spanDays = r1 - r0 + 1;
+  const depth = isDepth();
+  let shallowI = -1, deepI = -1;
+  for (let i = a; i < b; i++){
+    const v = state.vals[i];
+    const shallower = depth ? (shallowI === -1 || v < state.vals[shallowI]) : (shallowI === -1 || v > state.vals[shallowI]);
+    const deeper = depth ? (deepI === -1 || v > state.vals[deepI]) : (deepI === -1 || v < state.vals[deepI]);
+    if (shallower) shallowI = i;
+    if (deeper) deepI = i;
+  }
+  const slope = trendPerYear();
+  let trendVal = "—", trendSub = "not enough data";
+  if (slope != null){
+    // convert to water-table sense: positive = rising water table
+    const rise = depth ? -slope : slope;
+    const word = Math.abs(rise) < 0.02 ? "steady" : (rise > 0 ? "rising" : "falling");
+    trendVal = (Math.abs(rise) < 0.02 ? "±" : "") + fmtLevel(Math.abs(rise));
+    trendSub = "water table " + word + ", selected range";
+  }
+  let nDiscVis = 0;
+  if (state.discDays && state.discDays.length){ const [da, db] = visibleDiscRange(); nDiscVis = db - da; }
+  const tiles = [
+    [depth ? "Median depth to water" : "Median water level", n ? fmtLevel(quantileSorted(sorted, 0.5)) : "—", "ft", "over selected range"],
+    ["Highest water table", n ? fmtLevel(state.vals[shallowI]) : "—", "ft", n ? fmtDate(state.days[shallowI]) : ""],
+    ["Lowest water table", n ? fmtLevel(state.vals[deepI]) : "—", "ft", n ? fmtDate(state.days[deepI]) : ""],
+    ["Trend", trendVal, slope != null ? "ft/yr" : "", trendSub],
+    ["Days with record", n.toLocaleString("en-US"), "", Math.round(n / spanDays * 100) + "% of range"],
+    ["Field measurements", nDiscVis.toLocaleString("en-US"), "", "in selected range"],
+  ];
+  tiles.forEach(([lbl, val, unit, sub]) => {
+    const t = document.createElement("div"); t.className = "tile";
+    const l = document.createElement("div"); l.className = "lbl"; l.textContent = lbl;
+    const v = document.createElement("div"); v.className = "val"; v.textContent = val;
+    if (unit && val !== "—"){ const u = document.createElement("span"); u.className = "unit"; u.textContent = unit; v.appendChild(u); }
+    const s = document.createElement("div"); s.className = "sub"; s.textContent = sub;
+    t.append(l, v, s); el.appendChild(t);
+  });
+}
+
+/* ============================== seasonal regime ============================== */
+let regimeCache = null;
+function renderRegime(){
+  const C = colors();
+  const canvas = document.getElementById("regimeCanvas");
+  const { ctx, W, H } = setupCanvas(canvas, 230);
+  setupCanvas(document.getElementById("regimeOverlay"), 230);
+  const padL = 52, padR = 10, padT = 8, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const [a, b] = visibleIndexRange();
+  const groups = Array.from({length:12}, () => []);
+  for (let i = a; i < b; i++) groups[dOf(state.days[i]).getUTCMonth()].push(state.vals[i]);
+  const stats = groups.map(g => {
+    if (!g.length) return null;
+    g.sort((x, y) => x - y);
+    return { med: quantileSorted(g, 0.5), p25: quantileSorted(g, 0.25), p75: quantileSorted(g, 0.75),
+             mean: g.reduce((s, v) => s + v, 0) / g.length, n: g.length };
+  });
+  let lo = Infinity, hi = -Infinity;
+  stats.forEach(s => { if (s){ lo = Math.min(lo, s.p25); hi = Math.max(hi, s.p75); } });
+  if (lo === Infinity){ lo = 0; hi = 1; }
+  if (hi - lo < 0.5){ const mid = (lo + hi) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+  const x = m => padL + (m + 0.5) / 12 * plotW;
+  const y = makeY({lo, hi}, padT, plotH);
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = C.grid; ctx.fillStyle = C.muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  linTicks(lo, hi).forEach(v => {
+    const yy = Math.round(y(v)) + 0.5;
+    if (yy < padT - 2 || yy > padT + plotH + 2) return;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillText(fmtAxisLevel(v), padL - 6, yy);
+  });
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let m = 0; m < 12; m++) ctx.fillText(MONTHS[m][0], x(m), padT + plotH + 6);
+  ctx.strokeStyle = C.axis;
+  ctx.beginPath(); ctx.moveTo(padL, padT + plotH + 0.5); ctx.lineTo(W - padR, padT + plotH + 0.5); ctx.stroke();
+  ctx.fillStyle = C.wash2;
+  ctx.beginPath();
+  let started = false;
+  for (let m = 0; m < 12; m++){ if (!stats[m]) continue; const xx = x(m), yy = y(stats[m].p75);
+    if (!started){ ctx.moveTo(xx, yy); started = true; } else ctx.lineTo(xx, yy); }
+  for (let m = 11; m >= 0; m--){ if (!stats[m]) continue; ctx.lineTo(x(m), y(stats[m].p25)); }
+  if (started){ ctx.closePath(); ctx.fill(); }
+  ctx.strokeStyle = C.series; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath(); started = false;
+  for (let m = 0; m < 12; m++){ if (!stats[m]) continue; const xx = x(m), yy = y(stats[m].med);
+    if (!started){ ctx.moveTo(xx, yy); started = true; } else ctx.lineTo(xx, yy); }
+  ctx.stroke();
+  regimeCache = { stats, x, y, W, H, padT, plotH, padL, plotW };
+}
+const regimeTip = document.getElementById("regimeTip");
+const regimeCanvasEl = document.getElementById("regimeCanvas");
+regimeCanvasEl.addEventListener("pointermove", e => {
+  if (!regimeCache) return;
+  const r = regimeCanvasEl.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const m = Math.max(0, Math.min(11, Math.floor((px - regimeCache.padL) / regimeCache.plotW * 12)));
+  const s = regimeCache.stats[m];
+  const C = colors();
+  const ov = document.getElementById("regimeOverlay");
+  const dpr = window.devicePixelRatio || 1;
+  const octx = ov.getContext("2d");
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, regimeCache.W, regimeCache.H);
+  const xx = Math.round(regimeCache.x(m)) + 0.5;
+  octx.strokeStyle = C.axis;
+  octx.beginPath(); octx.moveTo(xx, regimeCache.padT); octx.lineTo(xx, regimeCache.padT + regimeCache.plotH); octx.stroke();
+  const rows = s ? [
+    ["tv", fmtLevel(s.med) + " ft median", true],
+    ["tl", "25–75%: " + fmtLevel(s.p25) + " – " + fmtLevel(s.p75)],
+    ["tl", MONTH_FULL[m] + " · " + s.n.toLocaleString("en-US") + " days"]
+  ] : [["tv", "No data", false], ["tl", MONTH_FULL[m]]];
+  setTip(regimeTip, regimeCanvasEl.parentElement, regimeCache.x(m), regimeCache.padT + regimeCache.plotH / 2, rows);
+});
+regimeCanvasEl.addEventListener("pointerleave", () => {
+  regimeTip.style.display = "none";
+  const ov = document.getElementById("regimeOverlay");
+  ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
+});
+
+/* ============================== level duration curve ============================== */
+let fdcCache = null;
+function renderFDC(sorted){
+  const C = colors();
+  const canvas = document.getElementById("fdcCanvas");
+  const { ctx, W, H } = setupCanvas(canvas, 230);
+  setupCanvas(document.getElementById("fdcOverlay"), 230);
+  const padL = 52, padR = 10, padT = 8, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  ctx.clearRect(0, 0, W, H);
+  fdcCache = null;
+  if (sorted.length < 5){ ctx.fillStyle = C.muted; ctx.textAlign="center"; ctx.fillText("Not enough data for a duration curve", W/2, H/2); return; }
+  let lo = sorted[0], hi = sorted[sorted.length - 1];
+  if (hi - lo < 0.5){ const mid = (lo + hi) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+  const x = p => padL + p / 100 * plotW;
+  const y = makeY({lo, hi}, padT, plotH);
+  // qAt(p) = level such that the water table is at or above it on p% of days:
+  // for depth params that is the p-quantile of depth (depth <= value);
+  // for elevation params it is the (1-p)-quantile (level >= value)
+  const qAt = isDepth() ? (p => quantileSorted(sorted, p / 100))
+                        : (p => quantileSorted(sorted, 1 - p / 100));
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = C.grid; ctx.fillStyle = C.muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  linTicks(lo, hi).forEach(v => {
+    const yy = Math.round(y(v)) + 0.5;
+    if (yy < padT - 2 || yy > padT + plotH + 2) return;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillText(fmtAxisLevel(v), padL - 6, yy);
+  });
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let p = 0; p <= 100; p += 20){
+    const xx = Math.round(x(p)) + 0.5;
+    ctx.strokeStyle = C.grid;
+    ctx.beginPath(); ctx.moveTo(xx, padT); ctx.lineTo(xx, padT + plotH); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.fillText(p + "%", xx, padT + plotH + 6);
+  }
+  ctx.strokeStyle = C.axis;
+  ctx.beginPath(); ctx.moveTo(padL, padT + plotH + 0.5); ctx.lineTo(W - padR, padT + plotH + 0.5); ctx.stroke();
+  ctx.strokeStyle = C.series; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath();
+  const steps = Math.min(plotW, 400);
+  for (let k = 0; k <= steps; k++){
+    const p = 0.05 + k / steps * 99.9;
+    const xx = x(p), yy = y(qAt(p));
+    if (k === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+  }
+  ctx.stroke();
+  document.getElementById("fdcSub").textContent =
+    "Share of days the water table is at or above the level shown, selected range";
+  fdcCache = { x, y, qAt, W, H, padL, padT, plotW, plotH };
+}
+const fdcTip = document.getElementById("fdcTip");
+const fdcCanvasEl = document.getElementById("fdcCanvas");
+fdcCanvasEl.addEventListener("pointermove", e => {
+  if (!fdcCache) return;
+  const r = fdcCanvasEl.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const p = Math.max(0.05, Math.min(99.95, (px - fdcCache.padL) / fdcCache.plotW * 100));
+  const v = fdcCache.qAt(p);
+  const C = colors();
+  const ov = document.getElementById("fdcOverlay");
+  const dpr = window.devicePixelRatio || 1;
+  const octx = ov.getContext("2d");
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, fdcCache.W, fdcCache.H);
+  const xx = fdcCache.x(p), yy = fdcCache.y(v);
+  octx.strokeStyle = C.axis;
+  octx.beginPath(); octx.moveTo(Math.round(xx)+0.5, fdcCache.padT); octx.lineTo(Math.round(xx)+0.5, fdcCache.padT + fdcCache.plotH); octx.stroke();
+  octx.beginPath(); octx.arc(xx, yy, 6, 0, 7); octx.fillStyle = C.surface; octx.fill();
+  octx.beginPath(); octx.arc(xx, yy, 4, 0, 7); octx.fillStyle = C.series; octx.fill();
+  const lbl = "water table at or above this " + p.toFixed(p < 2 || p > 98 ? 1 : 0) + "% of days";
+  setTip(fdcTip, fdcCanvasEl.parentElement, xx, yy, [["tv", fmtLevel(v) + " ft", true], ["tl", lbl]]);
+});
+fdcCanvasEl.addEventListener("pointerleave", () => {
+  fdcTip.style.display = "none";
+  const ov = document.getElementById("fdcOverlay");
+  ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
+});
+
+/* ============================== annual means (line) ============================== */
+let annualCache = null;
+function annualStats(){
+  const [a, b] = visibleIndexRange();
+  const m = new Map();
+  for (let i = a; i < b; i++){
+    const wy = waterYear(state.days[i]);
+    let s = m.get(wy);
+    if (!s){ s = { sum:0, n:0, min:Infinity, max:-Infinity }; m.set(wy, s); }
+    const v = state.vals[i];
+    s.sum += v; s.n++; if (v < s.min) s.min = v; if (v > s.max) s.max = v;
+  }
+  return [...m.entries()].sort((x, y) => x[0] - y[0]);
+}
+function renderAnnual(years){
+  const C = colors();
+  const canvas = document.getElementById("annualCanvas");
+  const { ctx, W, H } = setupCanvas(canvas, 200);
+  setupCanvas(document.getElementById("annualOverlay"), 200);
+  const padL = 52, padR = 14, padT = 10, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  ctx.clearRect(0, 0, W, H);
+  annualCache = null;
+  if (!years.length) return;
+  let lo = Infinity, hi = -Infinity;
+  years.forEach(([, s]) => { const m = s.sum / s.n; lo = Math.min(lo, m); hi = Math.max(hi, m); });
+  if (hi - lo < 0.5){ const mid = (lo + hi) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  const y0 = years[0][0], y1 = years[years.length - 1][0];
+  const single = y1 === y0;
+  const nY = Math.max(1, y1 - y0);
+  const x = wy => single ? padL + plotW / 2 : padL + (wy - y0) / nY * plotW;
+  const y = makeY({lo, hi}, padT, plotH);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.strokeStyle = C.grid; ctx.fillStyle = C.muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  linTicks(lo, hi).forEach(v => {
+    const yy = Math.round(y(v)) + 0.5;
+    if (yy < padT - 2 || yy > padT + plotH + 2) return;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillText(fmtAxisLevel(v), padL - 6, yy);
+  });
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const stepY = [1,2,5,10,20,50].find(s => (y1 - y0 + 1) / s <= 10) || 100;
+  for (let wy = Math.ceil(y0 / stepY) * stepY; wy <= y1; wy += stepY) ctx.fillText(String(wy), x(wy), padT + plotH + 6);
+  ctx.strokeStyle = C.axis;
+  ctx.beginPath(); ctx.moveTo(padL, padT + plotH + 0.5); ctx.lineTo(W - padR, padT + plotH + 0.5); ctx.stroke();
+  // line through complete years, broken at year gaps
+  ctx.strokeStyle = C.series; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath();
+  let pen = false, prevWy = null;
+  years.forEach(([wy, s]) => {
+    const xx = x(wy), yy = y(s.sum / s.n);
+    if (!pen || (prevWy != null && wy - prevWy > 1)){ ctx.moveTo(xx, yy); pen = true; }
+    else ctx.lineTo(xx, yy);
+    prevWy = wy;
+  });
+  ctx.stroke();
+  const showMarkers = years.length <= 60;
+  years.forEach(([wy, s]) => {
+    const xx = x(wy), yy = y(s.sum / s.n);
+    ctx.globalAlpha = s.n >= 330 ? 1 : 0.45;
+    if (showMarkers){
+      ctx.beginPath(); ctx.arc(xx, yy, 6, 0, 7); ctx.fillStyle = C.surface; ctx.fill();
+      ctx.beginPath(); ctx.arc(xx, yy, 4, 0, 7); ctx.fillStyle = C.series; ctx.fill();
+    } else if (s.n < 330){
+      ctx.beginPath(); ctx.arc(xx, yy, 4.5, 0, 7); ctx.fillStyle = C.surface; ctx.fill();
+      ctx.beginPath(); ctx.arc(xx, yy, 3, 0, 7); ctx.fillStyle = C.series; ctx.fill();
+    }
+  });
+  ctx.globalAlpha = 1;
+  annualCache = { years: new Map(years), y0, y1, nY, single, x, y, W, H, padL, padT, plotW, plotH };
+}
+const annualTip = document.getElementById("annualTip");
+const annualCanvasEl = document.getElementById("annualCanvas");
+annualCanvasEl.addEventListener("pointermove", e => {
+  if (!annualCache) return;
+  const r = annualCanvasEl.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const wy = annualCache.single ? annualCache.y0
+    : Math.round(annualCache.y0 + (px - annualCache.padL) / annualCache.plotW * annualCache.nY);
+  const s = annualCache.years.get(wy);
+  const C = colors();
+  const ov = document.getElementById("annualOverlay");
+  const dpr = window.devicePixelRatio || 1;
+  const octx = ov.getContext("2d");
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, annualCache.W, annualCache.H);
+  if (wy < annualCache.y0 || wy > annualCache.y1){ annualTip.style.display = "none"; return; }
+  const xx = Math.round(annualCache.x(wy)) + 0.5;
+  octx.strokeStyle = C.axis;
+  octx.beginPath(); octx.moveTo(xx, annualCache.padT); octx.lineTo(xx, annualCache.padT + annualCache.plotH); octx.stroke();
+  if (s){
+    const mean = s.sum / s.n;
+    const yy = annualCache.y(mean);
+    octx.beginPath(); octx.arc(annualCache.x(wy), yy, 7, 0, 7); octx.fillStyle = C.surface; octx.fill();
+    octx.beginPath(); octx.arc(annualCache.x(wy), yy, 5, 0, 7); octx.fillStyle = C.series; octx.fill();
+    setTip(annualTip, annualCanvasEl.parentElement, annualCache.x(wy), yy, [
+      ["tv", fmtLevel(mean) + " ft mean", true],
+      ["tl", "Water year " + wy + (s.n >= 330 ? "" : " · partial (" + s.n + " days)")],
+      ["tl", "Range " + fmtLevel(s.min) + " – " + fmtLevel(s.max)]
+    ]);
+  } else {
+    setTip(annualTip, annualCanvasEl.parentElement, annualCache.x(wy), annualCache.padT + annualCache.plotH / 2,
+      [["tv", "No record", false], ["tl", "Water year " + wy]]);
+  }
+});
+annualCanvasEl.addEventListener("pointerleave", () => {
+  annualTip.style.display = "none";
+  const ov = document.getElementById("annualOverlay");
+  ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
+});
+
+/* ============================== tables ============================== */
+function buildTable(host, headers, rows){
+  host.textContent = "";
+  const tbl = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  headers.forEach(h => { const th = document.createElement("th"); th.textContent = h; trh.appendChild(th); });
+  thead.appendChild(trh); tbl.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    r.forEach(c => { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody); host.appendChild(tbl);
+}
+function renderTables(years, sorted){
+  const depth = isDepth();
+  const shallowLbl = "Shallowest", deepLbl = "Deepest";
+  buildTable(document.getElementById("annualTable"),
+    ["Water year", "Days", "Mean", depth ? shallowLbl : "Highest", depth ? deepLbl : "Lowest"],
+    years.map(([wy, s]) => [String(wy), String(s.n), fmtLevel(s.sum / s.n),
+      fmtLevel(depth ? s.min : s.max), fmtLevel(depth ? s.max : s.min)]));
+  const [a, b] = visibleIndexRange();
+  const groups = Array.from({length:12}, () => []);
+  for (let i = a; i < b; i++) groups[dOf(state.days[i]).getUTCMonth()].push(state.vals[i]);
+  buildTable(document.getElementById("monthlyTable"),
+    ["Month", "Days", "P25", "Median", "P75", "Mean"],
+    groups.map((g, m) => {
+      if (!g.length) return [MONTHS[m], "0", "—", "—", "—", "—"];
+      g.sort((x, y) => x - y);
+      return [MONTHS[m], String(g.length), fmtLevel(quantileSorted(g, 0.25)), fmtLevel(quantileSorted(g, 0.5)),
+              fmtLevel(quantileSorted(g, 0.75)), fmtLevel(g.reduce((s, v) => s + v, 0) / g.length)];
+    }));
+  const pcts = [1, 5, 10, 25, 50, 75, 90, 95, 99];
+  buildTable(document.getElementById("pctTable"),
+    ["Percentile", "Level (ft)"],
+    sorted.length ? pcts.map(p => ["P" + p, fmtLevel(quantileSorted(sorted, p / 100))]) : []);
+  const discRows = [];
+  if (state.discDays && state.discDays.length){
+    const [da, db] = visibleDiscRange();
+    for (let i = da; i < db; i++) discRows.push([fmtDate(state.discDays[i]), fmtLevel(state.discVals[i])]);
+  }
+  buildTable(document.getElementById("discTable"), ["Date", "Level (ft)"], discRows);
+}
+
+/* ============================== footer ============================== */
+function renderFoot(){
+  const s = state.site;
+  const f = document.getElementById("foot");
+  f.textContent = "";
+  const p0 = document.createElement("div");
+  p0.textContent = "Evaristo Critical Zone Hydrology Lab · University of Georgia";
+  const p1 = document.createElement("div");
+  p1.textContent = "Source: U.S. Geological Survey National Water Information System — groundwater daily values " +
+    "and field water-level measurements. Retrieved " + INDEX.generated + ".";
+  const p2 = document.createElement("div");
+  if (s.nP > 0){
+    p2.textContent = "Note: " + s.nP.toLocaleString("en-US") +
+      " recent daily values at this well are provisional and subject to revision. ";
+  }
+  if (s.nDo > 0){
+    p2.textContent += s.nDo.toLocaleString("en-US") +
+      " additional field measurements use other level parameters or datums and are not plotted.";
+  }
+  const p3 = document.createElement("div");
+  const a = document.createElement("a");
+  a.href = "https://waterdata.usgs.gov/monitoring-location/" + s.no + "/";
+  a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "Well page on waterdata.usgs.gov";
+  p3.appendChild(a);
+  f.append(p0, p1, p2, p3);
+}
+
+/* ============================== orchestration ============================== */
+function renderAll(){
+  if (!state.site || !state.days) return;
+  const sorted = visibleSortedVals();
+  const years = annualStats();
+  renderHydro();
+  renderTiles(sorted);
+  renderRegime();
+  renderFDC(sorted);
+  renderAnnual(years);
+  renderTables(years, sorted);
+  renderFoot();
+}
+const renderAllDebounced = debounce(renderAll, 120);
+new ResizeObserver(() => renderAllDebounced()).observe(document.getElementById("main"));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") renderAll(); });
+
+/* ============================== boot ============================== */
+(function boot(){
+  if (!INDEX){
+    document.getElementById("emptyState").textContent =
+      "Could not load data/sites_index.js — keep the data folder next to this HTML file.";
+    return;
+  }
+  applyFilter();
+  const hash = new URLSearchParams(location.hash.slice(1));
+  let start = hash.get("site");
+  if (!start || !byNo[start]){
+    let best = SITES[0];
+    SITES.forEach(s => { if (s.stats[s.pref][2] > best.stats[best.pref][2]) best = s; });
+    start = best.no;
+  }
+  selectSite(start);
+})();
+</script>
+</body>
+</html>

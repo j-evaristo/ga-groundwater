@@ -1,0 +1,53 @@
+name: Update GA groundwater data and deploy
+
+on:
+  schedule:
+    - cron: "43 10 * * *"    # daily at 10:43 UTC (~6:43 am Eastern), after USGS posts yesterday's daily values
+  workflow_dispatch:          # manual "Run workflow" button
+  push:
+    branches: [main]          # also redeploy whenever you change the code
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download all GA groundwater levels from USGS
+        run: python download_ga_groundwater.py
+        timeout-minutes: 40
+
+      - name: Build viewer data files
+        run: python build_viewer_data.py
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/data
+          cp ga_groundwater_explorer.html site/index.html
+          cp data/sites_index.js site/data/
+          cp data/sites_metadata.csv site/data/
+          cp -r data/sites site/data/sites
+          du -sh site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
