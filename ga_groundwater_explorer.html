@@ -281,9 +281,15 @@ const PARM_LABELS = {
 const STAT_LABELS = {"00003":"daily mean","00008":"daily median","00001":"daily maximum","00002":"daily minimum"};
 const DEPTH_PARAMS = new Set(["72019","61055"]);
 const keyParm = k => k.split(":")[0];
+const statName = s => {
+  if (STAT_LABELS[s]) return STAT_LABELS[s];
+  const m = /^3(\d{2})(\d{2})$/.exec(s);          // 3HHMM = fixed-time observation
+  if (m) return "observation at " + m[1] + ":" + m[2];
+  return "statistic " + s;
+};
 const keyLabel = k => {
   const [p, s] = k.split(":");
-  return (PARM_LABELS[p] || "Parameter " + p) + " — " + (STAT_LABELS[s] || "statistic " + s);
+  return (PARM_LABELS[p] || "Parameter " + p) + " — " + statName(s);
 };
 const dOf = day => new Date(day * DAY);
 const fmtDate = day => { const d = dOf(day); return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + d.getUTCFullYear(); };
@@ -385,7 +391,10 @@ function hideAllTips(){
 (function headerSummary(){
   if (!INDEX) return;
   let total = 0, disc = 0, minB = Infinity, maxE = -Infinity;
-  SITES.forEach(s => { const p = s.stats[s.pref]; total += p[2]; disc += s.nD + s.nDo; minB = Math.min(minB, p[0]); maxE = Math.max(maxE, p[1]); });
+  SITES.forEach(s => {
+    disc += s.nD + s.nDo;
+    Object.values(s.stats).forEach(p => { total += p[2]; minB = Math.min(minB, p[0]); maxE = Math.max(maxE, p[1]); });
+  });
   document.getElementById("headerSub").textContent =
     SITES.length + " monitoring wells · " + (total/1e6).toFixed(1) + "M daily water-level records · " +
     disc.toLocaleString("en-US") + " field measurements · " + yearOf(minB) + "–" + yearOf(maxE) +
