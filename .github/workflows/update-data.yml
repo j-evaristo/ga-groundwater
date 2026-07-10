@@ -31,7 +31,9 @@ jobs:
 
       - name: Download all GA groundwater levels from USGS
         run: python download_ga_groundwater.py
-        timeout-minutes: 40
+        env:
+          USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
+        timeout-minutes: 60
 
       - name: Build viewer data files
         run: python build_viewer_data.py

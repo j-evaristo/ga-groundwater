@@ -55,6 +55,11 @@ for d in (JSON_DIR, CSV_DIR, DISC_DIR):
 
 
 def fetch(url, tries=4, timeout=180):
+    """GET with retries. 429s from the OGC host are quota exhaustion, not
+    transient failures - honor Retry-After (or back off in minutes) and keep
+    the same URL so cursor pagination resumes exactly where it stopped."""
+    if url.startswith(OGC_FM):
+        tries = max(tries, 10)
     last = None
     for attempt in range(tries):
         try:
@@ -64,11 +69,19 @@ def fetch(url, tries=4, timeout=180):
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read().decode("utf-8")
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+        except urllib.error.HTTPError as e:
             last = e
-            code = getattr(e, "code", None)
-            if code == 404:
+            if e.code == 404:
                 return None
+            if e.code == 429:
+                ra = e.headers.get("Retry-After") if e.headers else None
+                wait = int(ra) if ra and str(ra).isdigit() else min(900, 60 * (2 ** attempt))
+                print(f"rate-limited (429); waiting {wait}s before resuming", flush=True)
+                time.sleep(wait)
+                continue
+            time.sleep(3 * (attempt + 1))
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last = e
             time.sleep(3 * (attempt + 1))
     raise RuntimeError(f"failed after {tries} tries: {url} ({last})")
 
