@@ -96,6 +96,9 @@ def fetch_catalogs():
         ("gw_series_catalog.rdb",
          SITE_SERVICE + "?format=rdb&stateCd=" + STATE_CD + "&siteType=GW"
          "&outputDataTypeCd=dv&siteStatus=all&seriesCatalogOutput=true"),
+        ("gw_sites_all_expanded.rdb",
+         SITE_SERVICE + "?format=rdb&stateCd=" + STATE_CD + "&siteType=GW"
+         "&siteStatus=all&siteOutput=expanded"),
     ]
     for name, url in targets:
         path = os.path.join(RAW, name)
@@ -182,9 +185,8 @@ def download_site_dv(site_no, info):
 
 def download_discrete(plan):
     """One paginated statewide field-measurements query, split into per-well
-    CSVs for the recorder wells in the plan. Far fewer API requests than
+    CSVs for every well in the state (recorder and periodic). Far fewer API requests than
     per-site fetching, which matters for the anonymous quota."""
-    wanted = {f"USGS-{s}": s for s in plan}
     by_site = {}
     url = f"{OGC_FM}?state_code={STATE_FIPS}&limit=10000&f=json"
     pages = 0
@@ -201,11 +203,12 @@ def download_discrete(plan):
         for ft in d.get("features", []):
             p = ft.get("properties", {})
             mlid = p.get("monitoring_location_id", "")
-            if mlid not in wanted or p.get("parameter_code") not in LEVEL_PARAMS:
+            if not mlid.startswith("USGS-") or p.get("parameter_code") not in LEVEL_PARAMS:
                 continue
+            site_no = mlid[5:]
             q = p.get("qualifier")
-            by_site.setdefault(wanted[mlid], []).append({
-                "site_no": wanted[mlid],
+            by_site.setdefault(site_no, []).append({
+                "site_no": site_no,
                 "time": p.get("time", ""),
                 "parameter_code": p.get("parameter_code", ""),
                 "value": p.get("value", ""),
@@ -238,6 +241,10 @@ def main():
     plan = build_site_plan()
     print(f"{len(plan)} wells to download through {END_DT}", flush=True)
     if "--dry-run" in sys.argv:
+        return
+    if "--discrete-only" in sys.argv:
+        n_disc = download_discrete(plan)
+        print(f"DISCRETE-ONLY DONE: {n_disc} rows", flush=True)
         return
     results = []
     done = 0

@@ -47,6 +47,7 @@ aside{background:var(--surface);border:1px solid var(--border);border-radius:12p
 .sort-row select{flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--page);color:var(--ink)}
 #map{width:100%;height:auto;display:block}
 #map .dot{fill:var(--muted);opacity:.55;cursor:pointer}
+#map .dot.per{opacity:.28}
 #map .dot:hover{opacity:1;fill:var(--series)}
 #map .dot.dim{opacity:.12}
 #map .dot.sel{fill:var(--series);opacity:1;stroke:var(--surface);stroke-width:2}
@@ -140,6 +141,12 @@ tbody tr:nth-child(even){background:var(--sel-bg)}
              aria-label="Search wells by number, name, county, or aquifer" autocomplete="off">
     </div>
     <div class="sort-row">
+      <label for="typeSel">Type</label>
+      <select id="typeSel" aria-label="Well type filter">
+        <option value="all">All wells</option>
+        <option value="rec">Recorder</option>
+        <option value="per">Periodic</option>
+      </select>
       <label for="sortSel">Sort</label>
       <select id="sortSel">
         <option value="no">Well number</option>
@@ -149,7 +156,10 @@ tbody tr:nth-child(even){background:var(--sel-bg)}
         <option value="end">Most recently active</option>
       </select>
     </div>
-    <svg id="map" role="img" aria-label="Map of Georgia with well locations"></svg>
+    <div id="mapWrap" style="position:relative">
+      <canvas id="mapPer" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+      <svg id="map" style="position:relative" role="img" aria-label="Map of Georgia with well locations"></svg>
+    </div>
     <div class="list-count" id="listCount"></div>
     <div class="site-list" id="siteList" role="listbox" aria-label="Monitoring wells"></div>
   </aside>
@@ -338,9 +348,13 @@ function applyTheme(){
   else document.documentElement.setAttribute("data-theme", t);
   themeBtn.textContent = "Theme: " + t[0].toUpperCase() + t.slice(1);
   renderAll();
+  if (typeof redrawPeriodic === "function") redrawPeriodic();
 }
 themeBtn.addEventListener("click", () => { themeIdx = (themeIdx + 1) % 3; applyTheme(); });
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderAll());
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  renderAll();
+  if (typeof redrawPeriodic === "function") redrawPeriodic();
+});
 function colors(){
   const cs = getComputedStyle(document.documentElement);
   const g = n => cs.getPropertyValue(n).trim();
@@ -362,13 +376,22 @@ const state = {
   discDays: null, discVals: null, discByDay: null,
   range: null,
   showDisc: true,
+  isPeriodic: false,
   loadToken: 0
 };
-const isDepth = () => state.skey && DEPTH_PARAMS.has(keyParm(state.skey));
+const isDepth = () => {
+  const p = state.skey ? keyParm(state.skey) : (state.site && state.site.dparm);
+  return !!p && DEPTH_PARAMS.has(p);
+};
+/* Period of record for list/chips/sorting: daily series for recorder wells,
+   field-measurement extent for periodic wells. */
+const porOf = s => s.rec ? s.stats[s.pref] : [s.db, s.de, s.dn];
+const activeSeriesLabel = () => state.skey ? keyLabel(state.skey)
+  : (PARM_LABELS[state.site.dparm] || "Water level") + " — field measurements";
 /* Full explorable extent: the daily series PLUS any field measurements that
    fall before/after it (340 wells have tape-downs outside the recorder era). */
 function fullExtent(){
-  const p = state.site.stats[state.skey];
+  const p = state.skey ? state.site.stats[state.skey] : [state.site.db, state.site.de];
   let b0 = p[0], b1 = p[1];
   if (state.discDays && state.discDays.length){
     b0 = Math.min(b0, state.discDays[0]);
@@ -390,13 +413,17 @@ function hideAllTips(){
 /* ============================== header summary ============================== */
 (function headerSummary(){
   if (!INDEX) return;
-  let total = 0, disc = 0, minB = Infinity, maxE = -Infinity;
+  let total = 0, disc = 0, minB = Infinity, maxE = -Infinity, nRec = 0, nPer = 0;
   SITES.forEach(s => {
     disc += s.nD + s.nDo;
-    Object.values(s.stats).forEach(p => { total += p[2]; minB = Math.min(minB, p[0]); maxE = Math.max(maxE, p[1]); });
+    if (s.rec) nRec++; else nPer++;
+    const [b, e] = porOf(s);
+    minB = Math.min(minB, b); maxE = Math.max(maxE, e);
+    Object.values(s.stats).forEach(p => { total += p[2]; });
   });
   document.getElementById("headerSub").textContent =
-    SITES.length + " monitoring wells · " + (total/1e6).toFixed(1) + "M daily water-level records · " +
+    nRec + " recorder wells · " + nPer.toLocaleString("en-US") + " periodic wells · " +
+    (total/1e6).toFixed(1) + "M daily records · " +
     disc.toLocaleString("en-US") + " field measurements · " + yearOf(minB) + "–" + yearOf(maxE) +
     " · retrieved " + INDEX.generated;
 })();
@@ -412,17 +439,24 @@ function sortSites(arr){
   const k = sortSel.value;
   const c = arr.slice();
   if (k === "no") c.sort((a,b) => a.no < b.no ? -1 : 1);
-  else if (k === "nm") c.sort((a,b) => a.nm.localeCompare(b.nm));
-  else if (k === "len") c.sort((a,b) => b.stats[b.pref][2] - a.stats[a.pref][2]);
+  else if (k === "nm") c.sort((a,b) => (a.nm || "").localeCompare(b.nm || ""));
+  else if (k === "len") c.sort((a,b) => porOf(b)[2] - porOf(a)[2]);
   else if (k === "wd") c.sort((a,b) => (b.wd||0) - (a.wd||0));
-  else if (k === "end") c.sort((a,b) => b.stats[b.pref][1] - a.stats[a.pref][1]);
+  else if (k === "end") c.sort((a,b) => porOf(b)[1] - porOf(a)[1]);
   return c;
 }
+let filteredSet = null;
 function applyFilter(){
   const q = searchBox.value.trim().toLowerCase();
-  filtered = !q ? SITES.slice() :
-    SITES.filter(s => (s.no + " " + s.nm + " " + s.cty + " " + s.naq + " " + s.laq).toLowerCase().includes(q));
+  const t = document.getElementById("typeSel").value;
+  filtered = SITES.filter(s => {
+    if (t === "rec" && !s.rec) return false;
+    if (t === "per" && s.rec) return false;
+    if (!q) return true;
+    return (s.no + " " + (s.nm || "") + " " + (s.cty || "") + " " + (s.naq || "") + " " + (s.laq || "")).toLowerCase().includes(q);
+  });
   filtered = sortSites(filtered);
+  filteredSet = new Set(filtered.map(s => s.no));
   renderList();
   updateMapDim();
 }
@@ -430,9 +464,12 @@ function renderList(){
   const active = document.activeElement;
   const focusedNo = active && active.classList && active.classList.contains("site-item") ? active.dataset.no : null;
   siteListEl.textContent = "";
-  listCountEl.textContent = filtered.length + " of " + SITES.length + " wells";
+  const LIST_CAP = 1500;
+  const shown = filtered.length > LIST_CAP ? filtered.slice(0, LIST_CAP) : filtered;
+  listCountEl.textContent = filtered.length.toLocaleString("en-US") + " of " + SITES.length.toLocaleString("en-US") + " wells" +
+    (filtered.length > shown.length ? " · list shows the first " + LIST_CAP.toLocaleString("en-US") + " — refine the search" : "");
   const frag = document.createDocumentFragment();
-  filtered.forEach(s => {
+  shown.forEach(s => {
     const btn = document.createElement("button");
     btn.className = "site-item" + (state.site && state.site.no === s.no ? " sel" : "");
     btn.setAttribute("role", "option");
@@ -440,9 +477,10 @@ function renderList(){
     btn.dataset.no = s.no;
     const l1 = document.createElement("span"); l1.className = "no"; l1.textContent = s.nm || s.no;
     const l2 = document.createElement("span"); l2.className = "nm"; l2.textContent = s.no + (s.cty ? " · " + s.cty : "");
-    const p = s.stats[s.pref];
+    const p = porOf(s);
     const meta = document.createElement("span"); meta.className = "meta";
-    meta.textContent = yearOf(p[0]) + "–" + yearOf(p[1]) + " · " + p[2].toLocaleString("en-US") + " days" +
+    meta.textContent = (s.rec ? "" : "periodic · ") + yearOf(p[0]) + "–" + yearOf(p[1]) + " · " +
+      p[2].toLocaleString("en-US") + (s.rec ? " days" : " msmts") +
       (s.wd ? " · " + s.wd.toLocaleString("en-US") + " ft deep" : "");
     btn.append(l1, document.createTextNode(" "), l2, meta);
     btn.addEventListener("click", () => selectSite(s.no));
@@ -470,11 +508,13 @@ siteListEl.addEventListener("keydown", e => {
   items[j].focus(); e.preventDefault();
 });
 sortSel.addEventListener("change", applyFilter);
+document.getElementById("typeSel").addEventListener("change", applyFilter);
 
 /* ============================== map ============================== */
 const mapSvg = document.getElementById("map");
 const MAPW = 296, MAPH = 300;
 let mapDots = {};
+let mapXY = [];
 (function buildMap(){
   if (!INDEX) return;
   const B = INDEX.boundary;
@@ -499,10 +539,13 @@ let mapDots = {};
   mapSvg.appendChild(path);
   SITES.forEach(s => {
     if (s.lat == null || s.lon == null) return;
+    const X = px(s.lon), Y = py(s.lat);
+    mapXY.push([X, Y, s.no, s.rec]);
+    if (!s.rec) return;   // periodic wells render on the canvas layer
     const c = document.createElementNS(NS, "circle");
     c.setAttribute("class", "dot");
-    c.setAttribute("cx", px(s.lon).toFixed(1));
-    c.setAttribute("cy", py(s.lat).toFixed(1));
+    c.setAttribute("cx", X.toFixed(1));
+    c.setAttribute("cy", Y.toFixed(1));
     c.setAttribute("r", "3.2");
     const t = document.createElementNS(NS, "title");
     t.textContent = (s.nm || s.no) + " · " + s.no;
@@ -511,14 +554,61 @@ let mapDots = {};
     mapSvg.appendChild(c);
     mapDots[s.no] = c;
   });
+  // clicking near any well (including canvas-drawn periodic dots) selects it
+  mapSvg.addEventListener("click", e => {
+    if (e.target.tagName === "circle") return;
+    const r = mapSvg.getBoundingClientRect();
+    const vx = (e.clientX - r.left) / r.width * MAPW;
+    const vy = (e.clientY - r.top) / r.height * MAPH;
+    let best = null, bd = 49;   // within ~7 map units
+    for (const [x, y, no] of mapXY){
+      if (filteredSet && !filteredSet.has(no)) continue;
+      const d = (x - vx) * (x - vx) + (y - vy) * (y - vy);
+      if (d < bd){ bd = d; best = no; }
+    }
+    if (best) selectSite(best);
+  });
 })();
+const mapPerCanvas = document.getElementById("mapPer");
+function redrawPeriodic(){
+  if (!mapPerCanvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = mapPerCanvas.clientWidth || 1, h = mapPerCanvas.clientHeight || 1;
+  mapPerCanvas.width = Math.round(w * dpr);
+  mapPerCanvas.height = Math.round(h * dpr);
+  const ctx = mapPerCanvas.getContext("2d");
+  ctx.setTransform(dpr * w / MAPW, 0, 0, dpr * h / MAPH, 0, 0);
+  const cs = getComputedStyle(document.documentElement);
+  const muted = cs.getPropertyValue("--muted").trim();
+  const accent = cs.getPropertyValue("--series").trim();
+  const surface = cs.getPropertyValue("--surface").trim();
+  const selNo = state.site ? state.site.no : null;
+  ctx.fillStyle = muted;
+  for (const [x, y, no, rec] of mapXY){
+    if (rec || no === selNo) continue;
+    ctx.globalAlpha = !filteredSet || filteredSet.has(no) ? 0.3 : 0.05;
+    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  if (selNo){
+    const s = byNo[selNo];
+    if (s && !s.rec && s.lat != null){
+      const hit = mapXY.find(p => p[2] === selNo);
+      if (hit){
+        ctx.beginPath(); ctx.arc(hit[0], hit[1], 4.5, 0, 7); ctx.fillStyle = surface; ctx.fill();
+        ctx.beginPath(); ctx.arc(hit[0], hit[1], 3, 0, 7); ctx.fillStyle = accent; ctx.fill();
+      }
+    }
+  }
+}
+new ResizeObserver(() => redrawPeriodic()).observe(document.getElementById("mapWrap"));
 function updateMapDim(){
-  const inSet = new Set(filtered.map(s => s.no));
   for (const no in mapDots){
-    mapDots[no].classList.toggle("dim", !inSet.has(no));
+    mapDots[no].classList.toggle("dim", !!filteredSet && !filteredSet.has(no));
     mapDots[no].classList.toggle("sel", state.site && state.site.no === no);
   }
   if (state.site && mapDots[state.site.no]) mapSvg.appendChild(mapDots[state.site.no]);
+  redrawPeriodic();
 }
 
 /* ============================== site loading & selection ============================== */
@@ -529,7 +619,7 @@ function selectSite(no){
   const s = byNo[no];
   if (!s) return;
   state.site = s;
-  state.skey = s.pref;
+  state.skey = s.rec ? s.pref : null;
   history.replaceState(null, "", "#site=" + no);
   document.getElementById("emptyState").hidden = true;
   document.getElementById("stationView").hidden = false;
@@ -583,6 +673,19 @@ function onDataReady(no, token){
 }
 function buildSeriesArrays(){
   const data = window.__WELL_DATA[state.site.no];
+  state.isPeriodic = Object.keys(data.series).length === 0;
+  if (state.isPeriodic){
+    state.skey = null;
+    const disc = data.disc || [];
+    const days = new Int32Array(disc.length), vals = new Float64Array(disc.length);
+    disc.forEach((p, j) => { days[j] = p[0]; vals[j] = p[1]; });
+    state.days = days; state.vals = vals;
+    state.discDays = new Int32Array(0); state.discVals = new Float64Array(0);
+    state.discByDay = new Map();
+    document.getElementById("hydroLegend").style.display = "none";
+    return;
+  }
+  document.getElementById("hydroLegend").style.display = "flex";
   let ser = data.series[state.skey];
   if (!ser){ state.skey = Object.keys(data.series)[0]; ser = data.series[state.skey]; }
   let n = 0;
@@ -614,10 +717,11 @@ function renderStationHead(){
   document.getElementById("stLink").href = "https://waterdata.usgs.gov/monitoring-location/" + s.no + "/";
   const chips = document.getElementById("chips");
   chips.textContent = "";
-  const p = s.stats[s.pref];
+  const p = porOf(s);
   const items = [
+    ["Well type", s.rec ? "Continuous recorder" : "Periodic (field visits only)"],
     ["Period of record", yearOf(p[0]) + "–" + yearOf(p[1])],
-    ["Daily values", p[2].toLocaleString("en-US")],
+    s.rec ? ["Daily values", p[2].toLocaleString("en-US")] : null,
     (s.nD + s.nDo) > 0 ? ["Field measurements", (s.nD + s.nDo).toLocaleString("en-US")] : null,
     s.wd != null ? ["Well depth", s.wd.toLocaleString("en-US") + " ft"] : null,
     s.naq ? ["Aquifer", s.naq] : null,
@@ -636,7 +740,7 @@ function renderStationHead(){
 }
 function renderStatSelect(){
   const sel = document.getElementById("statSel");
-  const keys = Object.keys(state.site.stats).sort();
+  const keys = state.site.rec ? Object.keys(state.site.stats).sort() : [];
   sel.textContent = "";
   if (keys.length < 2){ sel.hidden = true; return; }
   sel.hidden = false;
@@ -866,9 +970,9 @@ function renderHydro(){
     }
   }
   document.getElementById("hydroTitle").textContent =
-    keyLabel(state.skey).replace(/^(.)/, c => c.toUpperCase()) + ", ft";
+    activeSeriesLabel().replace(/^(.)/, c => c.toUpperCase()) + ", ft";
   document.getElementById("hydroSub").textContent =
-    nVis.toLocaleString("en-US") + " daily values" +
+    nVis.toLocaleString("en-US") + (state.isPeriodic ? " field measurements" : " daily values") +
     (nDiscVis ? " · " + nDiscVis.toLocaleString("en-US") + " field measurements" : "") +
     ", " + fmtDate(r0) + " – " + fmtDate(r1);
   document.getElementById("axisNote").textContent = isDepth()
@@ -905,7 +1009,8 @@ function hydroShowCursor(day, fromKeyboard){
   let i = lowerBound(state.days, day);
   if (i >= state.days.length) i = state.days.length - 1;
   if (i > 0 && Math.abs(state.days[i-1] - day) <= Math.abs(state.days[i] - day)) i--;
-  const hasData = i >= 0 && i < state.days.length && Math.abs(state.days[i] - day) <= 31 &&
+  const snapWin = state.isPeriodic ? Infinity : 31;
+  const hasData = i >= 0 && i < state.days.length && Math.abs(state.days[i] - day) <= snapWin &&
                   state.days[i] >= r0 && state.days[i] <= r1;
   const ov = document.getElementById("hydroOverlay");
   const dpr = window.devicePixelRatio || 1;
@@ -924,7 +1029,7 @@ function hydroShowCursor(day, fromKeyboard){
     octx.beginPath(); octx.arc(xx, yy, 6, 0, 7); octx.fillStyle = C.surface; octx.fill();
     octx.beginPath(); octx.arc(xx, yy, 4, 0, 7); octx.fillStyle = C.series; octx.fill();
     rows.push(["tv", fmtLevel(v) + " ft", true]);
-    rows.push(["tl", fmtDate(showDay) + " · " + keyLabel(state.skey)]);
+    rows.push(["tl", fmtDate(showDay) + " · " + activeSeriesLabel()]);
     if (state.showDisc && state.discByDay && state.discByDay.has(showDay)){
       rows.push(["tl", "Field measurement: " + fmtLevel(state.discByDay.get(showDay)) + " ft"]);
     }
@@ -958,10 +1063,22 @@ hydroCanvasEl.addEventListener("pointermove", e => {
 hydroCanvasEl.addEventListener("pointerleave", hydroHideCursor);
 hydroCanvasEl.addEventListener("keydown", e => {
   if (!hydroCache) return;
-  const step = e.shiftKey ? 30 : 1;
   let day = hydroCursor == null ? hydroCache.r1 : hydroCursor;
-  if (e.key === "ArrowLeft") day -= step;
-  else if (e.key === "ArrowRight") day += step;
+  const dir = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+  if (dir !== 0){
+    // when the cursor sits on a reading, arrows walk reading-to-reading so
+    // sparse records (periodic wells, gap edges) never trap the cursor
+    let i = lowerBound(state.days, day);
+    if (i >= state.days.length) i = state.days.length - 1;
+    if (i > 0 && Math.abs(state.days[i-1] - day) <= Math.abs(state.days[i] - day)) i--;
+    if (i >= 0 && state.days[i] === day){
+      const stepN = e.shiftKey ? (state.isPeriodic ? 5 : 30) : 1;
+      i = Math.max(0, Math.min(state.days.length - 1, i + dir * stepN));
+      day = state.days[i];
+    } else {
+      day += dir * (e.shiftKey ? 30 : 1);
+    }
+  }
   else if (e.key === "Home") day = hydroCache.r0;
   else if (e.key === "End") day = hydroCache.r1;
   else if (e.key === "Escape"){ hydroHideCursor(); return; }
@@ -1111,7 +1228,9 @@ function visibleSortedVals(){
 function trendPerYear(){
   const [a, b] = visibleIndexRange();
   const n = b - a;
-  if (n < 60) return null;
+  if (state.isPeriodic){
+    if (n < 12 || state.days[b-1] - state.days[a] < 1095) return null;
+  } else if (n < 60) return null;
   let sx = 0, sy = 0, sxx = 0, sxy = 0;
   for (let i = a; i < b; i++){
     const t = state.days[i] / 365.25;
@@ -1153,8 +1272,12 @@ function renderTiles(sorted){
     ["Highest water table", n ? fmtLevel(state.vals[shallowI]) : "—", "ft", n ? fmtDate(state.days[shallowI]) : ""],
     ["Lowest water table", n ? fmtLevel(state.vals[deepI]) : "—", "ft", n ? fmtDate(state.days[deepI]) : ""],
     ["Trend", trendVal, slope != null ? "ft/yr" : "", trendSub],
-    ["Days with record", n.toLocaleString("en-US"), "", Math.round(n / spanDays * 100) + "% of range"],
-    ["Field measurements", nDiscVis.toLocaleString("en-US"), "", "in selected range"],
+    state.isPeriodic
+      ? ["Field measurements", n.toLocaleString("en-US"), "", "in selected range"]
+      : ["Days with record", n.toLocaleString("en-US"), "", Math.round(n / spanDays * 100) + "% of range"],
+    state.isPeriodic
+      ? ["Time span", (spanDays / 365.25).toFixed(1), "yr", "selected range"]
+      : ["Field measurements", nDiscVis.toLocaleString("en-US"), "", "in selected range"],
   ];
   tiles.forEach(([lbl, val, unit, sub]) => {
     const t = document.createElement("div"); t.className = "tile";
@@ -1216,6 +1339,10 @@ function renderRegime(){
   for (let m = 0; m < 12; m++){ if (!stats[m]) continue; const xx = x(m), yy = y(stats[m].med);
     if (!started){ ctx.moveTo(xx, yy); started = true; } else ctx.lineTo(xx, yy); }
   ctx.stroke();
+  const regimeSub = document.querySelector("#regimeCanvas").closest(".card").querySelector(".card-sub");
+  if (regimeSub) regimeSub.textContent = state.isPeriodic
+    ? "Distribution of field measurements by calendar month, selected range"
+    : "Distribution of daily water levels by calendar month, selected range";
   regimeCache = { stats, x, y, W, H, padT, plotH, padL, plotW };
 }
 const regimeTip = document.getElementById("regimeTip");
@@ -1238,7 +1365,7 @@ regimeCanvasEl.addEventListener("pointermove", e => {
   const rows = s ? [
     ["tv", fmtLevel(s.med) + " ft median", true],
     ["tl", "25–75%: " + fmtLevel(s.p25) + " – " + fmtLevel(s.p75)],
-    ["tl", MONTH_FULL[m] + " · " + s.n.toLocaleString("en-US") + " days"]
+    ["tl", MONTH_FULL[m] + " · " + s.n.toLocaleString("en-US") + (state.isPeriodic ? " measurements" : " days")]
   ] : [["tv", "No data", false], ["tl", MONTH_FULL[m]]];
   setTip(regimeTip, regimeCanvasEl.parentElement, regimeCache.x(m), regimeCache.padT + regimeCache.plotH / 2, rows);
 });
@@ -1296,8 +1423,9 @@ function renderFDC(sorted){
     if (k === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
   }
   ctx.stroke();
-  document.getElementById("fdcSub").textContent =
-    "Share of days the water table is at or above the level shown, selected range";
+  document.getElementById("fdcSub").textContent = state.isPeriodic
+    ? "Share of field measurements at or above the level shown, selected range"
+    : "Share of days the water table is at or above the level shown, selected range";
   fdcCache = { x, y, qAt, W, H, padL, padT, plotW, plotH };
 }
 const fdcTip = document.getElementById("fdcTip");
@@ -1319,7 +1447,8 @@ fdcCanvasEl.addEventListener("pointermove", e => {
   octx.beginPath(); octx.moveTo(Math.round(xx)+0.5, fdcCache.padT); octx.lineTo(Math.round(xx)+0.5, fdcCache.padT + fdcCache.plotH); octx.stroke();
   octx.beginPath(); octx.arc(xx, yy, 6, 0, 7); octx.fillStyle = C.surface; octx.fill();
   octx.beginPath(); octx.arc(xx, yy, 4, 0, 7); octx.fillStyle = C.series; octx.fill();
-  const lbl = "water table at or above this " + p.toFixed(p < 2 || p > 98 ? 1 : 0) + "% of days";
+  const lbl = "water table at or above this " + p.toFixed(p < 2 || p > 98 ? 1 : 0) +
+    (state.isPeriodic ? "% of measurements" : "% of days");
   setTip(fdcTip, fdcCanvasEl.parentElement, xx, yy, [["tv", fmtLevel(v) + " ft", true], ["tl", lbl]]);
 });
 fdcCanvasEl.addEventListener("pointerleave", () => {
@@ -1385,14 +1514,17 @@ function renderAnnual(years){
     prevWy = wy;
   });
   ctx.stroke();
+  document.getElementById("annualSub").textContent = state.isPeriodic
+    ? "Mean of field measurements by water year (Oct\u2013Sep), selected range"
+    : "By water year (Oct\u2013Sep), selected range. Faded markers are partial years.";
   const showMarkers = years.length <= 60;
   years.forEach(([wy, s]) => {
     const xx = x(wy), yy = y(s.sum / s.n);
-    ctx.globalAlpha = s.n >= 330 ? 1 : 0.45;
+    ctx.globalAlpha = (state.isPeriodic || s.n >= 330) ? 1 : 0.45;
     if (showMarkers){
       ctx.beginPath(); ctx.arc(xx, yy, 6, 0, 7); ctx.fillStyle = C.surface; ctx.fill();
       ctx.beginPath(); ctx.arc(xx, yy, 4, 0, 7); ctx.fillStyle = C.series; ctx.fill();
-    } else if (s.n < 330){
+    } else if (!state.isPeriodic && s.n < 330){
       ctx.beginPath(); ctx.arc(xx, yy, 4.5, 0, 7); ctx.fillStyle = C.surface; ctx.fill();
       ctx.beginPath(); ctx.arc(xx, yy, 3, 0, 7); ctx.fillStyle = C.series; ctx.fill();
     }
@@ -1426,7 +1558,8 @@ annualCanvasEl.addEventListener("pointermove", e => {
     octx.beginPath(); octx.arc(annualCache.x(wy), yy, 5, 0, 7); octx.fillStyle = C.series; octx.fill();
     setTip(annualTip, annualCanvasEl.parentElement, annualCache.x(wy), yy, [
       ["tv", fmtLevel(mean) + " ft mean", true],
-      ["tl", "Water year " + wy + (s.n >= 330 ? "" : " · partial (" + s.n + " days)")],
+      ["tl", "Water year " + wy + (state.isPeriodic ? " · " + s.n + " measurement" + (s.n === 1 ? "" : "s")
+             : (s.n >= 330 ? "" : " · partial (" + s.n + " days)"))],
       ["tl", "Range " + fmtLevel(s.min) + " – " + fmtLevel(s.max)]
     ]);
   } else {
@@ -1459,15 +1592,16 @@ function buildTable(host, headers, rows){
 function renderTables(years, sorted){
   const depth = isDepth();
   const shallowLbl = "Shallowest", deepLbl = "Deepest";
+  const cnt = state.isPeriodic ? "Msmts" : "Days";
   buildTable(document.getElementById("annualTable"),
-    ["Water year", "Days", "Mean", depth ? shallowLbl : "Highest", depth ? deepLbl : "Lowest"],
+    ["Water year", cnt, "Mean", depth ? shallowLbl : "Highest", depth ? deepLbl : "Lowest"],
     years.map(([wy, s]) => [String(wy), String(s.n), fmtLevel(s.sum / s.n),
       fmtLevel(depth ? s.min : s.max), fmtLevel(depth ? s.max : s.min)]));
   const [a, b] = visibleIndexRange();
   const groups = Array.from({length:12}, () => []);
   for (let i = a; i < b; i++) groups[dOf(state.days[i]).getUTCMonth()].push(state.vals[i]);
   buildTable(document.getElementById("monthlyTable"),
-    ["Month", "Days", "P25", "Median", "P75", "Mean"],
+    ["Month", cnt, "P25", "Median", "P75", "Mean"],
     groups.map((g, m) => {
       if (!g.length) return [MONTHS[m], "0", "—", "—", "—", "—"];
       g.sort((x, y) => x - y);
@@ -1479,7 +1613,10 @@ function renderTables(years, sorted){
     ["Percentile", "Level (ft)"],
     sorted.length ? pcts.map(p => ["P" + p, fmtLevel(quantileSorted(sorted, p / 100))]) : []);
   const discRows = [];
-  if (state.discDays && state.discDays.length){
+  if (state.isPeriodic){
+    const [ia, ib] = visibleIndexRange();
+    for (let i = ia; i < ib; i++) discRows.push([fmtDate(state.days[i]), fmtLevel(state.vals[i])]);
+  } else if (state.discDays && state.discDays.length){
     const [da, db] = visibleDiscRange();
     for (let i = da; i < db; i++) discRows.push([fmtDate(state.discDays[i]), fmtLevel(state.discVals[i])]);
   }
@@ -1542,9 +1679,9 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
   const hash = new URLSearchParams(location.hash.slice(1));
   let start = hash.get("site");
   if (!start || !byNo[start]){
-    let best = SITES[0];
-    SITES.forEach(s => { if (s.stats[s.pref][2] > best.stats[best.pref][2]) best = s; });
-    start = best.no;
+    let best = null;
+    SITES.forEach(s => { if (s.rec && (!best || s.stats[s.pref][2] > best.stats[best.pref][2])) best = s; });
+    start = (best || SITES[0]).no;
   }
   selectSite(start);
 })();

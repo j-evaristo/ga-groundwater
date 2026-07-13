@@ -159,18 +159,23 @@ def process_site_csv(site_no):
 
 def process_discrete(site_no, pref_parm):
     """Discrete points for the preferred parameter -> [[epochDay, value], ...];
-    also counts per parameter."""
+    also usable-measurement counts per parameter.
+
+    The API reports one field visit as several rows (one per vertical datum,
+    plus valueless "NoMeasurement" rows), so measurements are deduplicated by
+    (visit time, parameter) and only rows with a parseable value are counted.
+    For the plotted parameter, only its most common vertical datum is used so
+    a series never mixes datums."""
     path = os.path.join(DISC_DIR, f"USGS_{site_no}.csv")
     counts = {}
     pts = []
     if not os.path.exists(path):
         return pts, counts
+    seen = set()
+    pref_rows = []
     with open(path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             parm = row["parameter_code"]
-            counts[parm] = counts.get(parm, 0) + 1
-            if parm != pref_parm:
-                continue
             try:
                 v = float(row["value"])
             except (TypeError, ValueError):
@@ -178,7 +183,19 @@ def process_discrete(site_no, pref_parm):
             t = row["time"]
             if len(t) < 10:
                 continue
-            pts.append([epoch_day(t[:10]), clean_num(v)])
+            key = (t, parm)
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[parm] = counts.get(parm, 0) + 1
+            if parm == pref_parm:
+                pref_rows.append((t, row.get("vertical_datum", ""), v))
+    if pref_rows:
+        datum_n = {}
+        for _, d, _v in pref_rows:
+            datum_n[d] = datum_n.get(d, 0) + 1
+        modal = max(datum_n, key=lambda d: datum_n[d])
+        pts = [[epoch_day(t[:10]), clean_num(v)] for t, d, v in pref_rows if d == modal]
     pts.sort()
     return pts, counts
 
@@ -190,9 +207,26 @@ def series_sort_key(key):
     return (pi, si)
 
 
+MIN_DISC_PERIODIC = 3   # periodic wells need at least this many usable level measurements
+
+
+def pick_disc_param(counts):
+    """Most-measured level parameter; PARAM_PREF order breaks ties."""
+    best = None
+    for p, c in counts.items():
+        if p not in LEVEL_PARAMS:
+            continue
+        rank = (-c, PARAM_PREF.index(p) if p in PARAM_PREF else 99)
+        if best is None or rank < best[0]:
+            best = (rank, p)
+    return best[1] if best else None
+
+
 def main():
     counties = load_counties()
-    sites = parse_rdb(os.path.join(RAW, "gw_sites_expanded.rdb"))
+    all_path = os.path.join(RAW, "gw_sites_all_expanded.rdb")
+    rec_path = os.path.join(RAW, "gw_sites_expanded.rdb")
+    sites = parse_rdb(all_path if os.path.exists(all_path) else rec_path)
     meta = {s["site_no"]: s for s in sites}
 
     ga = json.load(open(os.path.join(ASSETS, "state_boundary.json"), encoding="utf-8"))
@@ -200,17 +234,32 @@ def main():
 
     index, meta_rows = [], []
     total_vals = total_disc = 0
-    for site_no in sorted(meta):
+    n_recorder = n_periodic = n_skipped_sparse = 0
+    disc_sites = {fn[5:-4] for fn in os.listdir(DISC_DIR) if fn.startswith("USGS_")}
+    for site_no in sorted(set(meta) | disc_sites):
+        if site_no not in meta:
+            continue   # measurement at a site absent from the state site file
         result = process_site_csv(site_no)
-        if result is None:
-            continue
-        series, quals = result
-        if not series:
-            print(f"WARN: no level series for {site_no}")
-            continue
-        pref = min(series, key=series_sort_key)
-        pref_parm = pref.split(":")[0]
+        series, quals = (result if result is not None else ({}, {"P": 0, "e": 0}))
+        if series:
+            pref = min(series, key=series_sort_key)
+            pref_parm = pref.split(":")[0]
+            recorder = True
+        else:
+            pref = ""
+            counts_probe = process_discrete(site_no, "__none__")[1]
+            pref_parm = pick_disc_param(counts_probe)
+            if pref_parm is None:
+                continue
+            recorder = False
         disc, disc_counts = process_discrete(site_no, pref_parm)
+        if not recorder and len(disc) < MIN_DISC_PERIODIC:
+            n_skipped_sparse += 1
+            continue
+        if recorder:
+            n_recorder += 1
+        else:
+            n_periodic += 1
         m = meta[site_no]
 
         out = {"series": {}, "disc": disc}
@@ -242,6 +291,7 @@ def main():
         n_disc_other = sum(disc_counts.values()) - len(disc)
         entry = {
             "no": site_no,
+            "rec": 1 if recorder else 0,
             "nm": m.get("station_nm", "").strip(),
             "lat": fnum("dec_lat_va"),
             "lon": fnum("dec_long_va"),
@@ -259,19 +309,29 @@ def main():
             "nP": quals["P"],
             "nE": quals["e"],
         }
+        if not recorder:
+            entry["dparm"] = pref_parm
+            entry["db"] = disc[0][0]
+            entry["de"] = disc[-1][0]
+            entry["dn"] = len(disc)
+        # drop empty fields to keep the index lean (13k+ wells); keep
+        # structural keys even when empty/zero
+        keep = {"no", "nm", "rec", "stats", "pref"}
+        entry = {k: v for k, v in entry.items() if k in keep or (v is not None and v != "")}
         index.append(entry)
 
-        pref_s = series[pref]
+        pref_s = series[pref] if recorder else {"b": disc[0][0], "e": disc[-1][0], "n": 0}
         meta_rows.append({
             "site_no": site_no,
+            "well_type": "recorder" if recorder else "periodic",
             "station_nm": entry["nm"],
             "dec_lat_va": m.get("dec_lat_va", "").strip(),
             "dec_long_va": m.get("dec_long_va", "").strip(),
             "coord_datum": m.get("dec_coord_datum_cd", "").strip(),
             "county": county,
-            "huc_cd": entry["huc"],
+            "huc_cd": entry.get("huc", ""),
             "alt_va": m.get("alt_va", "").strip(),
-            "alt_datum_cd": entry["altd"],
+            "alt_datum_cd": entry.get("altd", ""),
             "well_depth_ft": m.get("well_depth_va", "").strip(),
             "hole_depth_ft": m.get("hole_depth_va", "").strip(),
             "nat_aqfr_cd": nat,
@@ -305,7 +365,9 @@ def main():
         w.writeheader()
         w.writerows(meta_rows)
 
-    print(f"index: {len(index)} wells, {total_vals} daily values, {total_disc} discrete points")
+    print(f"index: {len(index)} wells ({n_recorder} recorder, {n_periodic} periodic; "
+          f"{n_skipped_sparse} periodic wells with <{MIN_DISC_PERIODIC} measurements excluded), "
+          f"{total_vals} daily values, {total_disc} discrete points")
     sizes = sorted((os.path.getsize(os.path.join(SITES_DIR, fn)), fn) for fn in os.listdir(SITES_DIR))
     print(f"largest well file: {sizes[-1][1]} {sizes[-1][0]/1e6:.1f} MB")
     print(f"total sites dir: {sum(s for s, _ in sizes)/1e6:.1f} MB")

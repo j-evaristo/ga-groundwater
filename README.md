@@ -2,8 +2,8 @@
 
 **Evaristo Critical Zone Hydrology Lab · University of Georgia**
 
-Complete daily water-level record for every USGS groundwater recorder well in
-Georgia, with discrete field measurements, plus an interactive offline viewer.
+Complete water-level record for USGS groundwater wells in
+Georgia, covering both continuous recorder wells and periodic (field-visit-only) wells, plus an interactive offline viewer.
 
 **Source:** USGS National Water Information System — daily values
 (`waterservices.usgs.gov/nwis/dv`) and field measurements
@@ -22,12 +22,24 @@ Georgia, with discrete field measurements, plus an interactive offline viewer.
 | `download_ga_groundwater.py` | Downloads everything from USGS (re-run to refresh). |
 | `build_viewer_data.py` | Rebuilds the viewer data files from the CSVs. |
 
+## Well types
+
+The explorer contains two clearly-marked classes of wells:
+
+- **Recorder wells** — continuous daily water-level records (plus any field
+  measurements, overlaid on the daily hydrograph)
+- **Periodic wells** — field measurements only (tape-down / transducer visits,
+  no recorder). Marked with a "periodic" badge in the list, a Well type chip,
+  smaller fainter map dots, and a Type filter in the sidebar. Wells with fewer
+  than 3 usable level measurements are excluded from the viewer (they remain
+  in the downloaded CSVs).
+
 ## Dataset summary
 
 - Georgia groundwater wells with continuous (daily-values) water-level records,
   dominated by parameter **72019** (depth to water below land surface, ft)
-- Discrete field measurements for the same wells, from the USGS
-  field-measurements API
+- Discrete field measurements for all wells statewide (recorder and
+  periodic), from the USGS field-measurements API
 - Depth-to-water values increase downward: a rising value is a falling water
   table. Negative depths are artesian (water above land surface). The viewer's
   vertical axis is inverted accordingly so "up" always reads as a rising table.
