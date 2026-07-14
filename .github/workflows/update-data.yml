@@ -90,3 +90,17 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  retry-on-transient-failure:
+    needs: build-and-deploy
+    if: failure() && fromJSON(github.run_attempt) < 3
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Wait out the outage and retry the failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 900
+          gh run rerun ${{ github.run_id }} --failed --repo ${{ github.repository }}
