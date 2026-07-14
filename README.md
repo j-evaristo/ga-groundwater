@@ -64,7 +64,11 @@ python build_viewer_data.py         # rebuilds the viewer data files
 ```
 
 The included GitHub Actions workflow (`.github/workflows/update-data.yml`) runs
-these automatically every day and deploys to GitHub Pages.
+these automatically every day and deploys to GitHub Pages. Field measurements
+are kept in a rolling release asset (`field-measurements`) that each run
+restores and periodically refreshes, so a rate-limited measurements API never
+blocks the nightly daily-values update. An optional `USGS_API_KEY` repository
+secret raises the API limits.
 
 **Note:** recent values are provisional and subject to revision by USGS.
 Cite as: U.S. Geological Survey, National Water Information System (NWISWeb).

@@ -8,7 +8,7 @@ on:
     branches: [main]          # also redeploy whenever you change the code
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -29,11 +29,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore field measurements from the release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release download field-measurements -p measurements.tar.gz -D /tmp 2>/dev/null; then
+            mkdir -p data
+            tar -xzf /tmp/measurements.tar.gz -C data
+            echo "restored $(ls data/discrete | wc -l) well files"
+          else
+            echo "no measurements store yet - a fresh sweep will run"
+          fi
+
       - name: Download all GA groundwater levels from USGS
         run: python download_ga_groundwater.py
         env:
           USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
+          DISCRETE_REUSE_DAYS: "2"
         timeout-minutes: 60
+
+      - name: Update the measurements release store
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f data/discrete_marker.txt ] && [ -z "$(find data/discrete_marker.txt -mmin +90)" ]; then
+            tar -czf /tmp/measurements.tar.gz -C data discrete discrete_marker.txt
+            gh release view field-measurements >/dev/null 2>&1 || \
+              gh release create field-measurements --title "Field measurements store" \
+                --notes "Rolling store of USGS field measurements reused by the daily build when the measurements API is rate-limited."
+            gh release upload field-measurements /tmp/measurements.tar.gz --clobber
+            echo "release store updated"
+          else
+            echo "measurements unchanged this run; store not updated"
+          fi
 
       - name: Build viewer data files
         run: python build_viewer_data.py

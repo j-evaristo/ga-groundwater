@@ -236,6 +236,34 @@ def download_discrete(plan):
     return n_rows
 
 
+def refresh_discrete(plan):
+    """Refresh field measurements, reusing the previous sweep when a recent
+    one exists (DISCRETE_REUSE_DAYS) and falling back to it if the
+    rate-limited measurements API cannot complete a fresh sweep. Field visits
+    are infrequent (typically quarterly), so a several-day-old sweep loses
+    nothing while keeping the nightly daily-values refresh reliable."""
+    marker = os.path.join(ROOT, "data", "discrete_marker.txt")
+    reuse_days = float(os.environ.get("DISCRETE_REUSE_DAYS", "0") or 0)
+    have = len(os.listdir(DISC_DIR)) if os.path.isdir(DISC_DIR) else 0
+    if reuse_days > 0 and have and os.path.exists(marker):
+        age_days = (time.time() - os.path.getmtime(marker)) / 86400.0
+        if age_days < reuse_days:
+            print(f"discrete: reusing {have} well files from the previous sweep "
+                  f"({age_days:.1f} d old; refresh due after {reuse_days:g} d)", flush=True)
+            return 0
+    try:
+        n = download_discrete(plan)
+    except Exception as e:
+        if have:
+            print(f"WARN: measurements sweep failed ({e}); keeping the previous "
+                  f"{have} well files", flush=True)
+            return 0
+        raise
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write(END_DT + "\n")
+    return n
+
+
 def main():
     fetch_catalogs()
     plan = build_site_plan()
@@ -243,7 +271,7 @@ def main():
     if "--dry-run" in sys.argv:
         return
     if "--discrete-only" in sys.argv:
-        n_disc = download_discrete(plan)
+        n_disc = refresh_discrete(plan)
         print(f"DISCRETE-ONLY DONE: {n_disc} rows", flush=True)
         return
     results = []
@@ -260,7 +288,7 @@ def main():
             done += 1
             if done % 50 == 0 or status not in ("ok", "404"):
                 print(f"[{done}/{len(plan)}] {site_no}: {status} ({n} rows)", flush=True)
-    n_disc = download_discrete(plan)
+    n_disc = refresh_discrete(plan)
     with open(os.path.join(ROOT, "data", "download_log.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["site_no", "dv_rows", "status"])
