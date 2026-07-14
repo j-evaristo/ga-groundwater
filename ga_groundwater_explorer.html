@@ -161,6 +161,7 @@ tbody tr:nth-child(even){background:var(--sel-bg)}
       <svg id="map" style="position:relative" role="img" aria-label="Map of Georgia with well locations"></svg>
     </div>
     <div class="list-count" id="listCount"></div>
+    <div class="list-count"><a id="dlList" href="#" style="color:var(--series);text-decoration:none">Download this list (CSV)</a></div>
     <div class="site-list" id="siteList" role="listbox" aria-label="Monitoring wells"></div>
   </aside>
 
@@ -171,7 +172,7 @@ tbody tr:nth-child(even){background:var(--sel-bg)}
     <div id="stationView" hidden>
       <section class="station-head">
         <h2 id="stName"></h2>
-        <div class="site-no-line">USGS <span id="stNo"></span> · <a id="stLink" target="_blank" rel="noopener">USGS monitoring page ↗</a></div>
+        <div class="site-no-line">USGS <span id="stNo"></span> · <a id="stLink" target="_blank" rel="noopener">USGS monitoring page ↗</a> · <a id="dlDaily" href="#">Daily values (CSV)</a> · <a id="dlMeas" href="#">Field measurements (CSV)</a></div>
         <div class="chips" id="chips"></div>
       </section>
 
@@ -1626,6 +1627,10 @@ function renderTables(years, sorted){
 /* ============================== footer ============================== */
 function renderFoot(){
   const s = state.site;
+  document.getElementById("dlDaily").style.display = state.isPeriodic ? "none" : "";
+  const anyMeas = state.isPeriodic ? state.days && state.days.length > 0
+    : state.discDays && state.discDays.length > 0;
+  document.getElementById("dlMeas").style.display = anyMeas ? "" : "none";
   const f = document.getElementById("foot");
   f.textContent = "";
   const p0 = document.createElement("div");
@@ -1648,8 +1653,95 @@ function renderFoot(){
   a.target = "_blank"; a.rel = "noopener";
   a.textContent = "Well page on waterdata.usgs.gov";
   p3.appendChild(a);
+  p3.appendChild(document.createTextNode(" · "));
+  const dl = document.createElement("a");
+  dl.href = "https://github.com/j-evaristo/ga-groundwater/releases/download/dataset/dataset.tar.gz";
+  dl.textContent = "Download the complete dataset (CSV archive)";
+  p3.appendChild(dl);
   f.append(p0, p1, p2, p3);
 }
+
+/* ============================== CSV downloads ============================== */
+function csvEscape(v){
+  v = v == null ? "" : String(v);
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function csvText(headerComments, columns, rows){
+  const lines = headerComments.map(c => "# " + c);
+  lines.push(columns.join(","));
+  rows.forEach(r => lines.push(r.map(csvEscape).join(",")));
+  return lines.join("\r\n") + "\r\n";
+}
+function saveCSV(filename, text){
+  const blob = new Blob([text], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+const isoDay = d => dOf(d).toISOString().slice(0, 10);
+function buildDailyCSV(){
+  const [a, b] = visibleIndexRange();
+  const [parm, stat] = state.skey.split(":");
+  const rows = [];
+  for (let i = a; i < b; i++) rows.push([state.site.no, isoDay(state.days[i]), parm, stat, state.vals[i]]);
+  const text = csvText([
+    "USGS " + state.site.no + " " + (state.site.nm || ""),
+    keyLabel(state.skey) + ", feet",
+    "Date range " + isoDay(state.range[0]) + " to " + isoDay(state.range[1]),
+    "Source: USGS NWIS daily values, retrieved " + INDEX.generated + "; recent values may be provisional"
+  ], ["site_no", "date", "parameter_cd", "stat_cd", "value_ft"], rows);
+  return { filename: "USGS_" + state.site.no + "_waterlevel_daily_" + isoDay(state.range[0]) + "_" + isoDay(state.range[1]) + ".csv", text };
+}
+function buildMeasCSV(){
+  const rows = [];
+  let parm;
+  if (state.isPeriodic){
+    parm = state.site.dparm;
+    const [a, b] = visibleIndexRange();
+    for (let i = a; i < b; i++) rows.push([state.site.no, isoDay(state.days[i]), parm, state.vals[i]]);
+  } else {
+    parm = keyParm(state.site.pref);
+    const [a, b] = visibleDiscRange();
+    for (let i = a; i < b; i++) rows.push([state.site.no, isoDay(state.discDays[i]), parm, state.discVals[i]]);
+  }
+  const text = csvText([
+    "USGS " + state.site.no + " " + (state.site.nm || "") + " — field water-level measurements",
+    (PARM_LABELS[parm] || "Parameter " + parm) + ", feet (one row per field visit; duplicate datum rows removed)",
+    "Date range " + isoDay(state.range[0]) + " to " + isoDay(state.range[1]),
+    "Source: USGS field-measurements API, retrieved " + INDEX.generated
+  ], ["site_no", "date", "parameter_cd", "value_ft"], rows);
+  return { filename: "USGS_" + state.site.no + "_measurements_" + isoDay(state.range[0]) + "_" + isoDay(state.range[1]) + ".csv", text };
+}
+function buildListCSV(){
+  const rows = filtered.map(s => {
+    const p = porOf(s);
+    return [s.no, s.nm || "", s.rec ? "recorder" : "periodic", s.lat, s.lon, s.cty || "", s.naq || "", s.laq || "",
+            s.wd == null ? "" : s.wd, isoDay(p[0]), isoDay(p[1]), p[2]];
+  });
+  const text = csvText([
+    "USGS Georgia groundwater wells (" + rows.length + " of " + SITES.length + " matching the current search)",
+    "Source: USGS NWIS, retrieved " + INDEX.generated
+  ], ["site_no", "well_nm", "well_type", "lat", "lon", "county", "nat_aquifer", "local_aquifer",
+      "well_depth_ft", "begin_date", "end_date", "n_values"], rows);
+  return { filename: "usgs_ga_groundwater_wells.csv", text };
+}
+document.getElementById("dlDaily").addEventListener("click", e => {
+  e.preventDefault();
+  if (!state.site || !state.days || state.isPeriodic) return;
+  const c = buildDailyCSV(); saveCSV(c.filename, c.text);
+});
+document.getElementById("dlMeas").addEventListener("click", e => {
+  e.preventDefault();
+  if (!state.site || !state.days) return;
+  const c = buildMeasCSV(); saveCSV(c.filename, c.text);
+});
+document.getElementById("dlList").addEventListener("click", e => {
+  e.preventDefault();
+  const c = buildListCSV(); saveCSV(c.filename, c.text);
+});
 
 /* ============================== orchestration ============================== */
 function renderAll(){

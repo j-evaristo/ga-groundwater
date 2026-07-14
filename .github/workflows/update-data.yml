@@ -75,6 +75,15 @@ jobs:
           cp -r data/sites site/data/sites
           du -sh site
 
+      - name: Update the dataset release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -czf /tmp/dataset.tar.gz -C data csv discrete sites_metadata.csv
+          gh release view dataset >/dev/null 2>&1 ||             gh release create dataset --title "Complete dataset (CSV)"               --notes "Nightly-refreshed archive of all well CSVs (daily values and field measurements) and metadata. Source: USGS NWIS; recent values provisional."
+          gh release upload dataset /tmp/dataset.tar.gz --clobber
+          echo "dataset release updated"
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
