@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+import http.client
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -46,6 +47,10 @@ END_DT = date.today().isoformat()
 HEADERS = {"User-Agent": "GA-groundwater-research/1.0 (contact: evaristo@uga.edu)"}
 OGC_MIN_INTERVAL = 1.1  # seconds between OGC requests (anonymous quota)
 API_KEY = os.environ.get("USGS_API_KEY", "").strip()
+# Wall-clock deadline for the measurements sweep (set by refresh_discrete).
+# The GitHub runner would otherwise be killed from outside by the workflow
+# timeout, which never lets the cached-measurements fallback engage.
+SWEEP_DEADLINE = None
 
 DISC_COLS = ["site_no", "time", "parameter_code", "value", "unit_of_measure",
              "vertical_datum", "approval_status", "qualifier"]
@@ -76,11 +81,17 @@ def fetch(url, tries=4, timeout=180):
             if e.code == 429:
                 ra = e.headers.get("Retry-After") if e.headers else None
                 wait = int(ra) if ra and str(ra).isdigit() else min(900, 60 * (2 ** attempt))
+                if SWEEP_DEADLINE is not None and time.time() + wait > SWEEP_DEADLINE:
+                    raise RuntimeError("sweep budget exhausted during a rate-limit wait")
                 print(f"rate-limited (429); waiting {wait}s before resuming", flush=True)
                 time.sleep(wait)
                 continue
             time.sleep(3 * (attempt + 1))
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError,
+                http.client.HTTPException, ValueError) as e:
+            # HTTPException/ValueError cover truncated or malformed chunked
+            # responses (IncompleteRead, bad chunk headers) seen during
+            # waterservices brownouts - retry them like any network error
             last = e
             time.sleep(3 * (attempt + 1))
     raise RuntimeError(f"failed after {tries} tries: {url} ({last})")
@@ -192,6 +203,8 @@ def download_discrete(plan):
     pages = 0
     last_req = 0.0
     while url:
+        if SWEEP_DEADLINE is not None and time.time() > SWEEP_DEADLINE:
+            raise RuntimeError(f"sweep budget exhausted after {pages} pages")
         wait = OGC_MIN_INTERVAL - (time.time() - last_req)
         if wait > 0:
             time.sleep(wait)
@@ -251,7 +264,11 @@ def refresh_discrete(plan):
             print(f"discrete: reusing {have} well files from the previous sweep "
                   f"({age_days:.1f} d old; refresh due after {reuse_days:g} d)", flush=True)
             return 0
+    global SWEEP_DEADLINE
+    budget_min = float(os.environ.get("DISCRETE_SWEEP_BUDGET_MIN", "0") or 0)
     try:
+        if budget_min > 0:
+            SWEEP_DEADLINE = time.time() + budget_min * 60
         n = download_discrete(plan)
     except Exception as e:
         if have:
@@ -259,6 +276,8 @@ def refresh_discrete(plan):
                   f"{have} well files", flush=True)
             return 0
         raise
+    finally:
+        SWEEP_DEADLINE = None
     with open(marker, "w", encoding="utf-8") as f:
         f.write(END_DT + "\n")
     return n

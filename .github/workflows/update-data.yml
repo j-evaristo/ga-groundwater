@@ -45,6 +45,7 @@ jobs:
         run: python download_ga_groundwater.py
         env:
           USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
+          DISCRETE_SWEEP_BUDGET_MIN: "30"
           DISCRETE_REUSE_DAYS: "2"
         timeout-minutes: 60
 
@@ -103,4 +104,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sleep 900
-          gh run rerun ${{ github.run_id }} --failed --repo ${{ github.repository }}
+          gh run rerun ${{ github.run_id }} --failed --repo ${{ github.repository }} || \
+            echo "retry could not be triggered (already re-run or not retryable)"
