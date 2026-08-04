@@ -1376,6 +1376,44 @@ regimeCanvasEl.addEventListener("pointerleave", () => {
   ov.getContext("2d").clearRect(0, 0, ov.width, ov.height);
 });
 
+/* Normal-probability scale helpers: probit (inverse normal CDF, Acklam's
+   rational approximation) and normCdf (Abramowitz-Stegun 7.1.26). A probit
+   x-axis spreads the extremes so tail behavior is readable. */
+function probit(p){
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+             1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+             6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+             -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+             3.754408661907416e+00];
+  const pl = 0.02425;
+  let q, r;
+  if (p < pl){
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+           ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  }
+  if (p > 1 - pl){
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+            ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  }
+  q = p - 0.5; r = q * q;
+  return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+         (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+}
+function normCdf(z){
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const dn = Math.exp(-z*z/2) / Math.sqrt(2*Math.PI);
+  const poly = t*(0.319381530 + t*(-0.356563782 + t*(1.781477937 + t*(-1.821255978 + t*1.330274429))));
+  const p = 1 - dn * poly;
+  return z >= 0 ? p : 1 - p;
+}
+const PROB_TICKS = [0.01, 0.1, 1, 5, 10, 30, 50, 70, 90, 95, 99, 99.9, 99.99];
+const fmtPct = e => (e < 0.1 || e > 99.9) ? e.toFixed(2) : (e < 1 || e > 99) ? e.toFixed(1) : e.toFixed(0);
+
 /* ============================== level duration curve ============================== */
 let fdcCache = null;
 function renderFDC(sorted){
@@ -1391,7 +1429,10 @@ function renderFDC(sorted){
   let lo = sorted[0], hi = sorted[sorted.length - 1];
   if (hi - lo < 0.5){ const mid = (lo + hi) / 2; lo = mid - 0.5; hi = mid + 0.5; }
   const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
-  const x = p => padL + p / 100 * plotW;
+  const n = sorted.length;
+  const pLoF = Math.max(0.00005, 0.5 / n), pHiF = Math.min(0.99995, 1 - 0.5 / n);
+  const zLo = probit(pLoF), zHi = probit(pHiF);
+  const x = pct => padL + (probit(Math.min(pHiF, Math.max(pLoF, pct / 100))) - zLo) / (zHi - zLo) * plotW;
   const y = makeY({lo, hi}, padT, plotH);
   // qAt(p) = level such that the water table is at or above it on p% of days:
   // for depth params that is the p-quantile of depth (depth <= value);
@@ -1407,27 +1448,29 @@ function renderFDC(sorted){
     ctx.fillText(fmtAxisLevel(v), padL - 6, yy);
   });
   ctx.textAlign = "center"; ctx.textBaseline = "top";
-  for (let p = 0; p <= 100; p += 20){
-    const xx = Math.round(x(p)) + 0.5;
+  PROB_TICKS.forEach(pt => {
+    if (pt / 100 < pLoF || pt / 100 > pHiF) return;
+    const xx = Math.round(x(pt)) + 0.5;
     ctx.strokeStyle = C.grid;
     ctx.beginPath(); ctx.moveTo(xx, padT); ctx.lineTo(xx, padT + plotH); ctx.stroke();
-    ctx.fillStyle = C.muted; ctx.fillText(p + "%", xx, padT + plotH + 6);
-  }
+    ctx.fillStyle = C.muted; ctx.fillText(fmtPct(pt), xx, padT + plotH + 6);
+  });
   ctx.strokeStyle = C.axis;
   ctx.beginPath(); ctx.moveTo(padL, padT + plotH + 0.5); ctx.lineTo(W - padR, padT + plotH + 0.5); ctx.stroke();
   ctx.strokeStyle = C.series; ctx.lineWidth = 2; ctx.lineJoin = "round";
   ctx.beginPath();
-  const steps = Math.min(plotW, 400);
+  const steps = Math.min(plotW, 500);
   for (let k = 0; k <= steps; k++){
-    const p = 0.05 + k / steps * 99.9;
-    const xx = x(p), yy = y(qAt(p));
+    const z = zLo + k / steps * (zHi - zLo);      // uniform in probit space
+    const pct = Math.max(pLoF, Math.min(pHiF, normCdf(z))) * 100;
+    const xx = x(pct), yy = y(qAt(pct));
     if (k === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
   }
   ctx.stroke();
   document.getElementById("fdcSub").textContent = state.isPeriodic
     ? "Share of field measurements at or above the level shown, selected range"
     : "Share of days the water table is at or above the level shown, selected range";
-  fdcCache = { x, y, qAt, W, H, padL, padT, plotW, plotH };
+  fdcCache = { x, y, qAt, W, H, padL, padT, plotW, plotH, zLo, zHi, pLoF, pHiF };
 }
 const fdcTip = document.getElementById("fdcTip");
 const fdcCanvasEl = document.getElementById("fdcCanvas");
@@ -1435,7 +1478,8 @@ fdcCanvasEl.addEventListener("pointermove", e => {
   if (!fdcCache) return;
   const r = fdcCanvasEl.getBoundingClientRect();
   const px = e.clientX - r.left;
-  const p = Math.max(0.05, Math.min(99.95, (px - fdcCache.padL) / fdcCache.plotW * 100));
+  const z = fdcCache.zLo + (px - fdcCache.padL) / fdcCache.plotW * (fdcCache.zHi - fdcCache.zLo);
+  const p = Math.max(fdcCache.pLoF, Math.min(fdcCache.pHiF, normCdf(z))) * 100;
   const v = fdcCache.qAt(p);
   const C = colors();
   const ov = document.getElementById("fdcOverlay");
@@ -1448,7 +1492,7 @@ fdcCanvasEl.addEventListener("pointermove", e => {
   octx.beginPath(); octx.moveTo(Math.round(xx)+0.5, fdcCache.padT); octx.lineTo(Math.round(xx)+0.5, fdcCache.padT + fdcCache.plotH); octx.stroke();
   octx.beginPath(); octx.arc(xx, yy, 6, 0, 7); octx.fillStyle = C.surface; octx.fill();
   octx.beginPath(); octx.arc(xx, yy, 4, 0, 7); octx.fillStyle = C.series; octx.fill();
-  const lbl = "water table at or above this " + p.toFixed(p < 2 || p > 98 ? 1 : 0) +
+  const lbl = "water table at or above this " + fmtPct(p) +
     (state.isPeriodic ? "% of measurements" : "% of days");
   setTip(fdcTip, fdcCanvasEl.parentElement, xx, yy, [["tv", fmtLevel(v) + " ft", true], ["tl", lbl]]);
 });
