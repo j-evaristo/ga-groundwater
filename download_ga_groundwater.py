@@ -59,7 +59,7 @@ for d in (JSON_DIR, CSV_DIR, DISC_DIR):
     os.makedirs(d, exist_ok=True)
 
 
-def fetch(url, tries=4, timeout=180):
+def fetch(url, tries=6, timeout=180):
     """GET with retries. 429s from the OGC host are quota exhaustion, not
     transient failures - honor Retry-After (or back off in minutes) and keep
     the same URL so cursor pagination resumes exactly where it stopped."""
