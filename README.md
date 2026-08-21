@@ -1,6 +1,6 @@
 # Georgia USGS Groundwater Data & Explorer
 
-**Evaristo Critical Zone Hydrology Lab · University of Georgia**
+**Evaristo Critical Zone Hydrology Lab**
 
 Complete water-level record for USGS groundwater wells in
 Georgia, covering both continuous recorder wells and periodic (field-visit-only) wells, plus an interactive offline viewer.
