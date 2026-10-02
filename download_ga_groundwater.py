@@ -67,6 +67,10 @@ API_KEY = os.environ.get("USGS_API_KEY", "").strip()
 # timeout, which never lets the cached-measurements fallback engage.
 SWEEP_DEADLINE = None
 
+
+class SweepBudgetExhausted(RuntimeError):
+    pass
+
 DISC_COLS = ["site_no", "time", "parameter_code", "value", "unit_of_measure",
              "vertical_datum", "approval_status", "qualifier"]
 
@@ -97,7 +101,7 @@ def fetch(url, tries=6, timeout=180):
                 ra = e.headers.get("Retry-After") if e.headers else None
                 wait = int(ra) if ra and str(ra).isdigit() else min(900, 60 * (2 ** attempt))
                 if SWEEP_DEADLINE is not None and time.time() + wait > SWEEP_DEADLINE:
-                    raise RuntimeError("sweep budget exhausted during a rate-limit wait")
+                    raise SweepBudgetExhausted("sweep budget exhausted during a rate-limit wait")
                 print(f"rate-limited (429); waiting {wait}s before resuming", flush=True)
                 time.sleep(wait)
                 continue
@@ -361,17 +365,17 @@ def download_site_dv(site_no, info):
     return site_no, n, "ok"
 
 
-def download_discrete(plan):
-    """One paginated statewide field-measurements query, split into per-well
-    CSVs for every well in the state (recorder and periodic). Far fewer API requests than
-    per-site fetching, which matters for the anonymous quota."""
+def fetch_measurements(query):
+    """Page through one field-measurements query, filtered server-side to the
+    water-level parameters; returns ({site_no: [rows]}, pages)."""
     by_site = {}
-    url = f"{OGC_FM}?state_code={STATE_FIPS}&limit=10000&f=json"
+    url = (f"{OGC_FM}?{query}&parameter_code={','.join(LEVEL_PARAMS)}"
+           f"&limit=10000&skipGeometry=true&f=json")
     pages = 0
     last_req = 0.0
     while url:
         if SWEEP_DEADLINE is not None and time.time() > SWEEP_DEADLINE:
-            raise RuntimeError(f"sweep budget exhausted after {pages} pages")
+            raise SweepBudgetExhausted(f"sweep budget exhausted after {pages} pages")
         wait = OGC_MIN_INTERVAL - (time.time() - last_req)
         if wait > 0:
             time.sleep(wait)
@@ -402,6 +406,10 @@ def download_discrete(plan):
             print(f"discrete batch: page {pages}", flush=True)
         nxt = [l["href"] for l in d.get("links", []) if l.get("rel") == "next"]
         url = nxt[0] if nxt else None
+    return by_site, pages
+
+
+def write_discrete(by_site):
     n_rows = 0
     for site_no, rows in by_site.items():
         rows.sort(key=lambda r: (r["time"], r["parameter_code"]))
@@ -411,8 +419,92 @@ def download_discrete(plan):
             w.writeheader()
             w.writerows(rows)
         n_rows += len(rows)
+    return n_rows
+
+
+def download_discrete(plan):
+    """One paginated statewide field-measurements query, split into per-well
+    CSVs for every well in the state (recorder and periodic). Far fewer API
+    requests than per-site fetching, which matters for the anonymous quota."""
+    by_site, pages = fetch_measurements(f"state_code={STATE_FIPS}")
+    n_rows = write_discrete(by_site)
     print(f"discrete batch: {pages} pages, {len(by_site)} wells, {n_rows} measurements",
           flush=True)
+    return n_rows
+
+
+def county_wells():
+    """{county code: {site_no}} for every groundwater site, from the site file."""
+    out = {}
+    for r in parse_rdb(os.path.join(RAW, "gw_sites_all_expanded.rdb")):
+        c = r.get("county_cd", "").strip()
+        if c:
+            out.setdefault(c, set()).add(r["site_no"])
+    return out
+
+
+def read_county_state(marker):
+    """{"done": {county: epoch}, "tried": {county: epoch}} saved in the marker;
+    empty for a missing marker or the older plain-date one."""
+    try:
+        with open(marker, encoding="utf-8") as f:
+            state = json.load(f)
+        return {"done": dict(state.get("done", {})), "tried": dict(state.get("tried", {}))}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {"done": {}, "tried": {}}
+
+
+def refresh_discrete_by_county(marker, reuse_days):
+    """Rolling refresh for a state whose statewide sweep cannot finish within
+    the shared anonymous API quota (DISCRETE_PARTITION=county). Whole counties
+    are re-fetched, stalest first, until the sweep budget runs out; each
+    finished county replaces its wells' files, and the refresh times persist
+    in the marker (part of the release store), so every county is refreshed
+    within a few nights. A county that could not finish moves to the back of
+    the next night's queue, so one oversized county cannot starve the rest."""
+    state = read_county_state(marker)
+    done, tried = state["done"], state["tried"]
+    wells = county_wells()
+    counties = sorted(wells)
+    stored = {fn[5:-4] for fn in os.listdir(DISC_DIR) if fn.startswith("USGS_")}
+    cutoff = time.time() - reuse_days * 86400
+    due = sorted((c for c in counties if done.get(c, 0) < cutoff),
+                 key=lambda c: max(done.get(c, 0), tried.get(c, 0)))
+    if not due:
+        print(f"discrete: all {len(counties)} counties refreshed within "
+              f"{reuse_days:g} d", flush=True)
+        return 0
+    n_rows = finished = 0
+    for c in due:
+        try:
+            by_site, pages = fetch_measurements(f"state_code={STATE_FIPS}&county_code={c}")
+        except SweepBudgetExhausted as e:
+            tried[c] = int(time.time())
+            print(f"discrete: {e} in county {c}", flush=True)
+            break
+        except Exception as e:
+            tried[c] = int(time.time())
+            print(f"WARN: county {c} measurements failed ({e})", flush=True)
+            continue
+        known = len(wells[c] & stored)
+        if not by_site and known >= 5:
+            # wells with stored measurements cannot all lose them at once: the
+            # county filter is not matching, so keep their files and retry later
+            tried[c] = int(time.time())
+            print(f"WARN: county {c} returned no measurements although {known} of "
+                  f"its wells have them; keeping the stored files", flush=True)
+            continue
+        n_rows += write_discrete(by_site)
+        done[c] = int(time.time())
+        tried.pop(c, None)
+        finished += 1
+        print(f"discrete: county {c} refreshed ({pages} pages, {len(by_site)} wells)",
+              flush=True)
+    with open(marker, "w", encoding="utf-8") as f:
+        json.dump({"swept": END_DT, "done": done, "tried": tried}, f, sort_keys=True)
+    left = sum(1 for c in counties if done.get(c, 0) < cutoff)
+    print(f"discrete: {finished} counties refreshed this run, {left} of "
+          f"{len(counties)} still due", flush=True)
     return n_rows
 
 
@@ -422,16 +514,25 @@ def refresh_discrete(plan):
     rate-limited measurements API cannot complete a fresh sweep. Field visits
     are infrequent (typically quarterly), so a several-day-old sweep loses
     nothing while keeping the nightly daily-values refresh reliable."""
+    global SWEEP_DEADLINE
     marker = os.path.join(ROOT, "data", "discrete_marker.txt")
     reuse_days = float(os.environ.get("DISCRETE_REUSE_DAYS", "0") or 0)
     have = len(os.listdir(DISC_DIR)) if os.path.isdir(DISC_DIR) else 0
+    county_mode = os.environ.get("DISCRETE_PARTITION", "") == "county"
+    if county_mode:
+        budget_min = float(os.environ.get("DISCRETE_SWEEP_BUDGET_MIN", "0") or 0)
+        if budget_min > 0:
+            SWEEP_DEADLINE = time.time() + budget_min * 60
+        try:
+            return refresh_discrete_by_county(marker, reuse_days)
+        finally:
+            SWEEP_DEADLINE = None
     if reuse_days > 0 and have and os.path.exists(marker):
         age_days = (time.time() - os.path.getmtime(marker)) / 86400.0
         if age_days < reuse_days:
             print(f"discrete: reusing {have} well files from the previous sweep "
                   f"({age_days:.1f} d old; refresh due after {reuse_days:g} d)", flush=True)
             return 0
-    global SWEEP_DEADLINE
     budget_min = float(os.environ.get("DISCRETE_SWEEP_BUDGET_MIN", "0") or 0)
     try:
         if budget_min > 0:
