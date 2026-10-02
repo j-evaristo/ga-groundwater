@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,8 +46,9 @@ jobs:
         env:
           USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
           DISCRETE_SWEEP_BUDGET_MIN: "30"
+          DV_RETRY_BUDGET_MIN: "12"   # straggler retry rounds before the archive fallback
           DISCRETE_REUSE_DAYS: "2"
-        timeout-minutes: 60
+        timeout-minutes: 75
 
       - name: Update the measurements release store
         env:
@@ -80,14 +81,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf /tmp/dataset.tar.gz -C data csv discrete sites_metadata.csv
+          tar -czf /tmp/dataset.tar.gz -C data csv discrete sites_metadata.csv raw/gw_sites_expanded.rdb raw/gw_series_catalog.rdb raw/gw_sites_all_expanded.rdb
           gh release view dataset >/dev/null 2>&1 ||             gh release create dataset --title "Complete dataset (CSV)"               --notes "Nightly-refreshed archive of all well CSVs (daily values and field measurements) and metadata. Source: USGS NWIS; recent values provisional."
           gh release upload dataset /tmp/dataset.tar.gz --clobber
           echo "dataset release updated"
 
+      # Per-attempt artifact name: reruns share the run's artifact namespace,
+      # so a fixed name collides with an earlier attempt's upload.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-${{ github.run_attempt }}
 
       - id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+
+      # GitHub's artifact listing can lag just after upload; one more try.
+      - name: Wait before retrying the deployment
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 60
+
+      - id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
