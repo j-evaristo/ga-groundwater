@@ -41,12 +41,11 @@ jobs:
             echo "no measurements store yet - a fresh sweep will run"
           fi
 
-      - name: Download all GA groundwater levels from USGS
+      - name: Update GA groundwater levels from the USGS Water Data APIs
         run: python download_ga_groundwater.py
         env:
           USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
           DISCRETE_SWEEP_BUDGET_MIN: "30"
-          DV_RETRY_BUDGET_MIN: "12"   # straggler retry rounds before the archive fallback
           DISCRETE_REUSE_DAYS: "2"
         timeout-minutes: 75
 
@@ -81,9 +80,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf /tmp/dataset.tar.gz -C data csv discrete sites_metadata.csv raw/gw_sites_expanded.rdb raw/gw_series_catalog.rdb raw/gw_sites_all_expanded.rdb
+          tar -czf /tmp/dataset.tar.gz -C data csv discrete sites_metadata.csv state raw/series.json $(cd data && ls raw/*.rdb)
           gh release view dataset >/dev/null 2>&1 ||             gh release create dataset --title "Complete dataset (CSV)"               --notes "Nightly-refreshed archive of all well CSVs (daily values and field measurements) and metadata. Source: USGS NWIS; recent values provisional."
-          gh release upload dataset /tmp/dataset.tar.gz --clobber
+          # upload under a temporary name, then swap it in, so a failed upload
+          # never leaves the release without an archive
+          cp /tmp/dataset.tar.gz /tmp/dataset-next.tar.gz
+          gh release upload dataset /tmp/dataset-next.tar.gz --clobber
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/dataset" --jq '.assets[] | "\(.id) \(.name)"')
+          old=$(echo "$assets" | awk '$2 == "dataset.tar.gz" {print $1}')
+          new=$(echo "$assets" | awk '$2 == "dataset-next.tar.gz" {print $1}')
+          if [ -n "$old" ]; then gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"; fi
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/assets/$new" -f name=dataset.tar.gz > /dev/null
           echo "dataset release updated"
 
       # Per-attempt artifact name: reruns share the run's artifact namespace,

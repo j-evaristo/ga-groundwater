@@ -124,7 +124,7 @@ def process_site_csv(site_no):
     path = os.path.join(CSV_DIR, f"USGS_{site_no}.csv")
     if not os.path.exists(path):
         return None
-    per_key = {}   # (parm, stat) -> {epoch_day: value}
+    per_series = {}   # (parm, stat, time_series_id) -> {epoch_day: value}
     quals = {"P": 0, "e": 0}
     with open(path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -137,7 +137,8 @@ def process_site_csv(site_no):
                 except ValueError:
                     v = None
             d = epoch_day(row["date"])
-            bucket = per_key.setdefault((row["parm_cd"], row["stat_cd"]), {})
+            key = (row["parm_cd"], row["stat_cd"], row.get("time_series_id") or "")
+            bucket = per_series.setdefault(key, {})
             if d not in bucket or (bucket[d] is None and v is not None):
                 bucket[d] = v
             qparts = row["qualifiers"].split()
@@ -145,6 +146,22 @@ def process_site_csv(site_no):
                 quals["P"] += 1
             if "e" in qparts:
                 quals["e"] += 1
+    # A well can report one parameter/statistic through several series (e.g.
+    # nested piezometers, or a legacy record continued by a new series): use
+    # the most complete series, filling only the days it lacks from the others.
+    by_key = {}
+    for (parm, stat, _), days in per_series.items():
+        by_key.setdefault((parm, stat), []).append(days)
+    per_key = {}
+    for key, buckets in by_key.items():
+        buckets.sort(key=lambda b: (sum(v is not None for v in b.values()),
+                                    sum(v for v in b.values() if v is not None)), reverse=True)
+        merged = {}
+        for b in buckets:
+            for d, v in b.items():
+                if d not in merged or (merged[d] is None and v is not None):
+                    merged[d] = v
+        per_key[key] = merged
     series = {}
     for (parm, stat), days in per_key.items():
         pts = sorted((d, clean_num(v)) for d, v in days.items() if v is not None)

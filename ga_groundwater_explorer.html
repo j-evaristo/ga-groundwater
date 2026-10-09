@@ -1692,7 +1692,7 @@ function renderFoot(){
   const p0 = document.createElement("div");
   p0.textContent = "Evaristo Critical Zone Hydrology Lab";
   const p1 = document.createElement("div");
-  p1.textContent = "Source: U.S. Geological Survey National Water Information System — groundwater daily values " +
+  p1.textContent = "Source: U.S. Geological Survey Water Data APIs, National Water Information System — groundwater daily values " +
     "and field water-level measurements. Retrieved " + INDEX.generated + ".";
   const p2 = document.createElement("div");
   if (s.nP > 0){
@@ -1747,7 +1747,7 @@ function buildDailyCSV(){
     "USGS " + state.site.no + " " + (state.site.nm || ""),
     keyLabel(state.skey) + ", feet",
     "Date range " + isoDay(state.range[0]) + " to " + isoDay(state.range[1]),
-    "Source: USGS NWIS daily values, retrieved " + INDEX.generated + "; recent values may be provisional"
+    "Source: USGS Water Data APIs (NWIS daily values), retrieved " + INDEX.generated + "; recent values may be provisional"
   ], ["site_no", "date", "parameter_cd", "stat_cd", "value_ft"], rows);
   return { filename: "USGS_" + state.site.no + "_waterlevel_daily_" + isoDay(state.range[0]) + "_" + isoDay(state.range[1]) + ".csv", text };
 }
@@ -1779,7 +1779,7 @@ function buildListCSV(){
   });
   const text = csvText([
     "USGS Georgia groundwater wells (" + rows.length + " of " + SITES.length + " matching the current search)",
-    "Source: USGS NWIS, retrieved " + INDEX.generated
+    "Source: USGS Water Data APIs (NWIS), retrieved " + INDEX.generated
   ], ["site_no", "well_nm", "well_type", "lat", "lon", "county", "nat_aquifer", "local_aquifer",
       "well_depth_ft", "begin_date", "end_date", "n_values"], rows);
   return { filename: "usgs_ga_groundwater_wells.csv", text };
