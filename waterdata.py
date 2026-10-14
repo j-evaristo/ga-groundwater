@@ -71,7 +71,9 @@ RDB_COLS = ["agency_cd", "site_no", "station_nm", "site_tp_cd", "dec_lat_va", "d
             "alt_datum_cd", "drain_area_va", "contrib_drain_area_va", "well_depth_va",
             "hole_depth_va", "nat_aqfr_cd", "aqfr_cd", "aqfr_type_cd", "construction_dt"]
 
-SF_COLS = ["site_no", "date", "stat_cd", "discharge_cfs", "qualifiers", "method_id", "method_desc"]
+SF_COLS = ["site_no", "date", "stat_cd", "discharge_cfs", "qualifiers", "method_id", "method_desc",
+           "parm_cd"]
+CSV_SCHEMA = 2                     # 2: streamflow CSVs carry parm_cd (00060 or 72137)
 GW_COLS = ["site_no", "date", "parm_cd", "stat_cd", "value", "qualifiers", "time_series_id"]
 
 
@@ -342,6 +344,7 @@ class Pipeline:
         for d in (self.csv_dir, self.raw, self.state_dir):
             os.makedirs(d, exist_ok=True)
         self.cols = SF_COLS if kind == "streamflow" else GW_COLS
+        self.default_parm = self.parameters[0]
 
     # --- dataset archive ---------------------------------------------------
 
@@ -579,6 +582,8 @@ class Pipeline:
         idcol = "method_id" if self.kind == "streamflow" else "time_series_id"
         with open(path, encoding="utf-8", newline="") as f:
             for r in csv.DictReader(f):
+                if not r.get("parm_cd"):
+                    r["parm_cd"] = self.default_parm
                 sid = r.get(idcol) or "legacy"
                 if self.kind == "groundwater" and sid == "legacy":
                     sid = f"legacy:{r.get('parm_cd', '')}:{r.get('stat_cd', '')}"
@@ -593,12 +598,8 @@ class Pipeline:
             if info is None:
                 return (2, "")
             return (0 if info.get("primary") else 1, info.get("begin") or "")
-        if self.kind == "streamflow":
-            order = sorted(rows.items(), key=lambda kv: (kv[1]["stat_cd"], rank(kv[0][0]),
-                                                         kv[0][0], kv[0][1]))
-        else:
-            order = sorted(rows.items(), key=lambda kv: (kv[1]["parm_cd"], kv[1]["stat_cd"],
-                                                         rank(kv[0][0]), kv[0][0], kv[0][1]))
+        order = sorted(rows.items(), key=lambda kv: (kv[1]["parm_cd"], kv[1]["stat_cd"],
+                                                     rank(kv[0][0]), kv[0][0], kv[0][1]))
         tmp = self.csv_path(site) + ".tmp"
         with open(tmp, "w", encoding="utf-8", newline="") as f:
             w = csv.DictWriter(f, fieldnames=self.cols, extrasaction="ignore")
@@ -613,19 +614,21 @@ class Pipeline:
         if self.kind == "streamflow":
             return {"site_no": info["site"], "date": p["time"], "stat_cd": info["stat"],
                     "discharge_cfs": value_text(value), "qualifiers": quals,
-                    "method_id": p["time_series_id"], "method_desc": info["desc"]}
+                    "method_id": p["time_series_id"], "method_desc": info["desc"],
+                    "parm_cd": info["parm"]}
         return {"site_no": info["site"], "date": p["time"], "parm_cd": info["parm"],
                 "stat_cd": info["stat"], "value": value_text(value), "qualifiers": quals,
                 "time_series_id": p["time_series_id"]}
 
     def row_key(self, r):
-        return (r["stat_cd"],) if self.kind == "streamflow" else (r["parm_cd"], r["stat_cd"])
+        return (r.get("parm_cd") or self.default_parm, r["stat_cd"])
 
-    def info_key(self, info):
-        return (info["stat"],) if self.kind == "streamflow" else (info["parm"], info["stat"])
+    @staticmethod
+    def info_key(info):
+        return (info["parm"], info["stat"])
 
     def coverage(self, site, series):
-        """{(stat,) or (parm, stat): [(begin, end), ...]} of in-scope series."""
+        """{(parm, stat): [(begin, end), ...]} of in-scope series."""
         cov = {}
         for info in series.values():
             if info["site"] == site:
@@ -655,16 +658,28 @@ class Pipeline:
         if group:
             yield group
 
+    def upgrade_csvs(self, series):
+        """Rewrite every station CSV in the current column layout (adds
+        parm_cd to streamflow files written before it existed)."""
+        n = 0
+        for fn in sorted(os.listdir(self.csv_dir)):
+            if fn.startswith("USGS_") and fn.endswith(".csv"):
+                site = fn[5:-4]
+                self.save_site(site, self.load_site(site), series)
+                n += 1
+        print(f"upgraded {n} station files to CSV schema {CSV_SCHEMA}", flush=True)
+
     # --- seeding from the legacy archive -----------------------------------
 
     def seed(self, series):
         """Label legacy rows with the v1 series that covers them. Stations
         whose series cannot be matched one-to-one (several series, or several
-        legacy methods, for one statistic) are returned for a full v1 fetch."""
+        legacy methods, for one statistic) are returned for a full v1 fetch,
+        along with the (site, parm, stat) keys the legacy archive held."""
         by_key = {}
         for sid, info in series.items():
             by_key.setdefault((info["site"],) + self.info_key(info), []).append(sid)
-        refetch, seeded, legacy = set(), 0, 0
+        refetch, seeded, legacy, held = set(), 0, 0, set()
         for fn in sorted(os.listdir(self.csv_dir)):
             if not (fn.startswith("USGS_") and fn.endswith(".csv")):
                 continue
@@ -682,11 +697,13 @@ class Pipeline:
             new = {}
             for r in old:
                 rk = self.row_key(r)
+                held.add((site,) + rk)
                 cands = by_key.get((site,) + rk, [])
                 one_to_one = len(cands) == 1 and len(methods[rk]) == 1
                 if not one_to_one and (len(cands) > 1 or len(methods[rk]) > 1):
                     refetch.add(site)
                 r = dict(r)
+                r["parm_cd"] = r.get("parm_cd") or self.default_parm
                 date = r["date"]
                 if one_to_one:
                     info = series[cands[0]]
@@ -711,7 +728,7 @@ class Pipeline:
             self.save_site(site, new, series)
         print(f"seed: {seeded} rows matched to v1 series, {legacy} legacy-only rows; "
               f"{len(refetch)} stations need a full v1 fetch", flush=True)
-        return refetch
+        return refetch, held
 
     # --- applying v1 data ----------------------------------------------------
 
@@ -885,8 +902,11 @@ class Pipeline:
             self.known_ids = set(state.get("known_series", [])) | set(series)
         prev_ids = set(state.get("series_ids", []))
         total = 0
+        if "daily_watermark" in state and state.get("csv_schema", 1) < CSV_SCHEMA:
+            self.upgrade_csvs(series)
+        state["csv_schema"] = CSV_SCHEMA
         if "daily_watermark" not in state:
-            refetch = self.seed(series)
+            refetch, held = self.seed(series)
             if refetch:
                 up, done = self.refresh_sites(refetch, series, "seed")
                 total += up
@@ -898,7 +918,9 @@ class Pipeline:
                      f"update reaches back to then")
             state["daily_watermark"] = start.isoformat()
             state["seeded"] = utcnow().date().isoformat()
-            prev_ids = set(series)
+            # series the legacy archive never held (e.g. tide-filtered
+            # discharge) go through the new-series full fetch below
+            prev_ids = {s for s, i in series.items() if (i["site"],) + self.info_key(i) in held}
         up, unknown, finished = self.incremental(state, series)
         total += up
         in_scope = {i["site"] for i in series.values()}
